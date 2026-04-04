@@ -9,7 +9,7 @@ import { isExemptFromRateLimit } from '@/lib/rate-limit';
  * - Handles CORS preflight requests
  * - Does NOT block any requests (rate limiting is applied per-route)
  */
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Handle CORS preflight (OPTIONS) requests
