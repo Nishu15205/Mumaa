@@ -22,7 +22,7 @@ export const PRICING_PLANS: PricingPlan[] = [
   {
     id: 'BASIC',
     name: 'Basic',
-    price: 29,
+    price: 499,
     trialDays: 7,
     popular: true,
     features: [
@@ -38,7 +38,7 @@ export const PRICING_PLANS: PricingPlan[] = [
   {
     id: 'PRO',
     name: 'Pro',
-    price: 59,
+    price: 999,
     trialDays: 7,
     popular: false,
     features: [

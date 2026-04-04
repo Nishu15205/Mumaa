@@ -237,7 +237,7 @@ export default function SubscriptionPage() {
                     <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
                     <div className="mt-2 mb-4">
                       <span className="text-3xl font-bold text-gray-900">
-                        ${plan.price}
+                        ₹{plan.price}
                       </span>
                       <span className="text-sm text-gray-500">/month</span>
                     </div>
