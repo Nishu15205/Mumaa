@@ -413,3 +413,22 @@ Stage Summary:
 - Complete end-to-end call flow verified: Parent calls → nanny gets real-time notification → nanny accepts → parent sees "Accepted" toast → both join same Jitsi room → call timer → end call → review
 - 0 lint errors, all changes compile cleanly
 - Socket service running on port 3003, dev server on port 3000
+
+---
+Task ID: 10
+Agent: Main Agent
+Task: Create demo testing credentials and ensure all services running
+
+Work Log:
+- Database was empty (no users) — pushed Prisma schema with force reset
+- Created 4 demo accounts using Prisma upsert (bcrypt-hashed passwords)
+- Admin: admin@mumaa.com / demo123
+- Parent: parent@demo.com / demo123 (BASIC plan, 0 calls used today)
+- Nanny1: nanny@demo.com / demo123 (Sunita Devi, 5yr exp, online)
+- Nanny2: priya@demo.com / demo123 (Priya Kumari, 3yr exp, online)
+- Socket service started on port 3003 with auto-restart wrapper
+- Dev server confirmed running on port 3000
+
+Stage Summary:
+- All 4 demo accounts ready for testing
+- Dev server (3000) + Socket service (3003) both running
