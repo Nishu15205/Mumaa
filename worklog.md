@@ -290,4 +290,26 @@ Stage Summary:
 - All approved nannies get 30-day free trial (1 month)
 - Database is clean - no fake/seed data, only admin account
 - Nanny earnings already shows ₹0 until admin pays (was already implemented)
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Fix nanny login flow - make it easy for approved nannies to get credentials and login
+
+Work Log:
+- Problem: When admin approves nanny application, a random temp password was generated but never shared with anyone. Nanny had no way to know login credentials.
+- Solution implemented with 3 improvements:
+  1. **Updated approval API** (`/api/nanny-apply/[id]/route.ts`): Now generates a readable password like `Mumaa@4521` and returns it in response as `credentials: { email, password, name }`
+  2. **Updated Admin Dashboard** (`AdminApplications.tsx`): After approval, shows a credentials dialog with email + temp password + copy buttons. Admin can share these with the nanny. Also shows tip about nanny self-setup.
+  3. **Created Nanny Setup page** (`NannySetup.tsx`): New page where nannies can enter their application email → see status (Pending/Approved/Rejected) → if approved, set their own password. Clean multi-step flow: Check Email → See Status → Set Password → Done → Go to Login.
+  4. **Created API** (`/api/nanny-setup/route.ts`): POST endpoint that checks application status by email and allows approved nannies to set their own password.
+  5. **Updated Login page** (`LoginForm.tsx`): Added violet "Approved Nanny? Set Up My Password →" banner between divider and signup links.
+  6. **Updated types** (`types/index.ts`): Added 'nanny-setup' to AppView type.
+  7. **Updated router** (`page.tsx`): Added NannySetup import, route rendering, and public view whitelist.
+
+Stage Summary:
+- Admin now sees credentials (email + password) after approving a nanny - can share via WhatsApp/call
+- Nanny can also self-setup: go to login page → click "Set Up My Password" → enter email → set password → login
+- No more "what credentials do I use" confusion for approved nannies
+- 0 lint errors, all changes compile cleanly
 - Apply as Nanny feature already existed (no changes needed)

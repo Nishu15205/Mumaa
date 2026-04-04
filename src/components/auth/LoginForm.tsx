@@ -195,8 +195,25 @@ export default function LoginForm() {
             <div className="flex-1 h-px bg-gray-100" />
           </div>
 
+          {/* Nanny password setup banner */}
+          <div className="mt-5 p-3 rounded-xl bg-violet-50 border border-violet-100">
+            <p className="text-xs text-violet-700 font-medium mb-0.5">
+              🎉 Approved Nanny?
+            </p>
+            <p className="text-xs text-violet-600 mb-2">
+              Set your password to start using your account
+            </p>
+            <button
+              type="button"
+              onClick={() => setCurrentView('nanny-setup')}
+              className="text-xs text-violet-700 hover:text-violet-800 font-bold underline underline-offset-2 hover:underline decoration-2"
+            >
+              Set Up My Password →
+            </button>
+          </div>
+
           {/* Links */}
-          <div className="mt-6 text-center space-y-3">
+          <div className="mt-4 text-center space-y-3">
             <p className="text-sm text-gray-600">
               Don&apos;t have an account?{' '}
               <button

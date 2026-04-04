@@ -18,6 +18,9 @@ import {
   FileText,
   Loader2,
   UserCheck,
+  Copy,
+  Check,
+  KeyRound,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +39,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { apiGet, apiPut } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -89,6 +98,8 @@ export default function AdminApplications() {
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [credentialsDialog, setCredentialsDialog] = useState<{name: string; email: string; password: string} | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   useEffect(() => {
     fetchApplications();
@@ -109,7 +120,11 @@ export default function AdminApplications() {
   const handleApprove = async (id: string) => {
     try {
       setActionLoading(id);
-      await apiPut(`/api/nanny-apply/${id}`, { action: 'approve' });
+      const data: any = await apiPut(`/api/nanny-apply/${id}`, { action: 'approve' });
+      // Show credentials dialog if returned
+      if (data.credentials) {
+        setCredentialsDialog(data.credentials);
+      }
       toast.success('Application approved! Nanny account has been created.');
       fetchApplications();
     } catch (err: any) {
@@ -117,6 +132,13 @@ export default function AdminApplications() {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    toast.success('Copied to clipboard!');
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
   const handleReject = async () => {
@@ -421,6 +443,82 @@ export default function AdminApplications() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Credentials Dialog - shown after approval */}
+      <Dialog open={!!credentialsDialog} onOpenChange={(open) => !open && setCredentialsDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              </div>
+              Account Created Successfully!
+            </DialogTitle>
+          </DialogHeader>
+          {credentialsDialog && (
+            <div className="space-y-4 pt-2">
+              <p className="text-sm text-gray-600">
+                Share these login credentials with <strong>{credentialsDialog.name}</strong>. They can also set their own password from the login page.
+              </p>
+
+              {/* Email */}
+              <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                <p className="text-xs font-medium text-gray-500 mb-1">Email</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{credentialsDialog.email}</p>
+                  <button
+                    onClick={() => copyToClipboard(credentialsDialog.email, 'email')}
+                    className="shrink-0 p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
+                    title="Copy email"
+                  >
+                    {copiedField === 'email' ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-gray-400" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Password */}
+              <div className="p-3 rounded-xl bg-violet-50 border border-violet-200">
+                <p className="text-xs font-medium text-violet-600 mb-1 flex items-center gap-1">
+                  <KeyRound className="w-3 h-3" />
+                  Temporary Password
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-bold text-violet-800 font-mono tracking-wide">{credentialsDialog.password}</p>
+                  <button
+                    onClick={() => copyToClipboard(credentialsDialog.password, 'password')}
+                    className="shrink-0 p-1.5 rounded-lg hover:bg-violet-200 transition-colors"
+                    title="Copy password"
+                  >
+                    {copiedField === 'password' ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-violet-400" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Info */}
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-100">
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  ⚡ <strong>Tip:</strong> The nanny can also go to the login page and click &quot;Set Up My Password&quot; to create their own password. The temporary password above will work for immediate login.
+                </p>
+              </div>
+
+              <Button
+                onClick={() => setCredentialsDialog(null)}
+                className="w-full h-11 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-medium"
+              >
+                Done
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

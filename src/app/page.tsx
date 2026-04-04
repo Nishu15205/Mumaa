@@ -37,6 +37,7 @@ import { VideoCallScreen } from '@/components/videocall/VideoCallScreen';
 import { IncomingCallDialog } from '@/components/videocall/IncomingCallDialog';
 import LegalPages from '@/components/common/LegalPages';
 import ApplyAsNanny from '@/components/common/ApplyAsNanny';
+import NannySetup from '@/components/common/NannySetup';
 
 // Error boundary to catch video call crashes gracefully
 class VideoCallErrorBoundary extends React.Component<
@@ -213,7 +214,7 @@ export default function Home() {
         setCurrentView(view);
       }
     } else if (!isAuthenticated) {
-      if (currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup' && currentView !== 'forgot-password' && currentView !== 'pricing' && currentView !== 'terms' && currentView !== 'privacy' && currentView !== 'about' && currentView !== 'apply-nanny') {
+      if (currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup' && currentView !== 'forgot-password' && currentView !== 'nanny-setup' && currentView !== 'pricing' && currentView !== 'terms' && currentView !== 'privacy' && currentView !== 'about' && currentView !== 'apply-nanny') {
         setCurrentView('landing');
       }
     }
@@ -290,7 +291,7 @@ export default function Home() {
       {!showVideoCall && (
         <AnimatePresence mode="wait">
           {/* Public Pages */}
-          {(!isAuthenticated || currentView === 'landing' || currentView === 'login' || currentView === 'signup' || currentView === 'forgot-password' || currentView === 'pricing' || currentView === 'terms' || currentView === 'privacy' || currentView === 'about' || currentView === 'apply-nanny') && (
+          {(!isAuthenticated || currentView === 'landing' || currentView === 'login' || currentView === 'signup' || currentView === 'forgot-password' || currentView === 'nanny-setup' || currentView === 'pricing' || currentView === 'terms' || currentView === 'privacy' || currentView === 'about' || currentView === 'apply-nanny') && (
             <motion.div
               key={currentView}
               initial={{ opacity: 0, y: 20 }}
@@ -326,6 +327,11 @@ export default function Home() {
                 />
               )}
               {currentView === 'apply-nanny' && <ApplyAsNanny />}
+              {currentView === 'nanny-setup' && (
+                <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-50 via-white to-pink-50 px-4">
+                  <NannySetup />
+                </div>
+              )}
             </motion.div>
           )}
 

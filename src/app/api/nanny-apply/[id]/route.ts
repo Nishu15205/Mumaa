@@ -98,8 +98,9 @@ export async function PUT(
       );
     }
 
-    // 1) Create User with role NANNY and a temporary password (hash of email)
-    const tempPassword = `mumaa_temp_${Date.now()}`;
+    // 1) Create User with role NANNY with a simple readable password
+    // Generate a 6-digit code that the admin can share with the nanny
+    const tempPassword = `Mumaa@${String(Math.floor(1000 + Math.random() * 9000))}`;
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
     const newUser = await db.user.create({
@@ -167,7 +168,12 @@ export async function PUT(
 
     return NextResponse.json({
       application: updatedApplication,
-      message: 'Application approved. Nanny account created with a temporary password — the nanny should use "Forgot Password" to set their own credentials.',
+      credentials: {
+        email: application.email,
+        password: tempPassword,
+        name: application.name,
+      },
+      message: 'Application approved! Share the login credentials with the nanny. They can also set their own password from the login page.',
     });
   } catch (error: unknown) {
     console.error('[Nanny Apply PUT]', error);

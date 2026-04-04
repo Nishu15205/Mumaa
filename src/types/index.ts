@@ -161,6 +161,7 @@ export type AppView =
   | 'login'
   | 'signup'
   | 'forgot-password'
+  | 'nanny-setup'
   | 'parent-dashboard'
   | 'nanny-dashboard'
   | 'admin-dashboard'
