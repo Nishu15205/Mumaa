@@ -31,16 +31,22 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       // Non-critical: continue even if status update fails
     }
 
-    // Notify caller via socket that we accepted
+    // Notify caller via socket that we accepted (with auth!)
     try {
       const { io } = await import('socket.io-client')
-      const socket = io('/?XTransformPort=3003', { path: '/socket.io' })
-      socket.emit('call-accepted', {
-        callId: call.callId,
-        toUserId: call.callerId,
-        roomName: call.callRoomId || null,
+      const socket = io('/?XTransformPort=3003', {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
       })
-      setTimeout(() => socket.disconnect(), 1000)
+      socket.on('connect', () => {
+        socket.emit('auth', { userId: user?.id, role: user?.role })
+        socket.emit('call-accepted', {
+          callId: call.callId,
+          toUserId: call.callerId,
+          roomName: call.callRoomId || null,
+        })
+        setTimeout(() => socket.disconnect(), 1500)
+      })
     } catch {
       // Non-critical: socket notification failed
     }
@@ -86,15 +92,21 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       // Non-critical
     }
 
-    // Notify caller via socket that we declined
+    // Notify caller via socket that we declined (with auth!)
     try {
       const { io } = await import('socket.io-client')
-      const socket = io('/?XTransformPort=3003', { path: '/socket.io' })
-      socket.emit('call-rejected', {
-        callId: call.callId,
-        toUserId: call.callerId,
+      const socket = io('/?XTransformPort=3003', {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
       })
-      setTimeout(() => socket.disconnect(), 1000)
+      socket.on('connect', () => {
+        socket.emit('auth', { userId: user?.id, role: user?.role })
+        socket.emit('call-rejected', {
+          callId: call.callId,
+          toUserId: call.callerId,
+        })
+        setTimeout(() => socket.disconnect(), 1500)
+      })
     } catch {
       // Non-critical
     }
@@ -118,9 +130,15 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
         if (call.callId && call.callerId) {
           apiPut(`/api/calls/${call.callId}/status`, { status: 'CANCELLED' }).catch(() => {})
           import('socket.io-client').then(({ io }) => {
-            const socket = io('/?XTransformPort=3003', { path: '/socket.io' })
-            socket.emit('call-rejected', { callId: call.callId, toUserId: call.callerId })
-            setTimeout(() => socket.disconnect(), 1000)
+            const socket = io('/?XTransformPort=3003', {
+              path: '/socket.io',
+              transports: ['websocket', 'polling'],
+            })
+            socket.on('connect', () => {
+              socket.emit('auth', { userId: user?.id, role: user?.role })
+              socket.emit('call-rejected', { callId: call.callId, toUserId: call.callerId })
+              setTimeout(() => socket.disconnect(), 1500)
+            })
           }).catch(() => {})
         }
 

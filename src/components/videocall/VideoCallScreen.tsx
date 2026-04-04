@@ -4,9 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   PhoneOff,
-  Mic,
-  MicOff,
-  MessageSquare,
   ArrowLeft,
   Clock,
   X,
@@ -17,7 +14,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/stores/app-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { CallTimer } from './CallTimer'
-import { ChatPanel } from './ChatPanel'
 import { StarRating } from '@/components/common/StarRating'
 import { WebRTCCall } from './WebRTCCall'
 
@@ -33,7 +29,6 @@ export function VideoCallScreen() {
     waitingForNanny ? 'waiting' : 'connecting'
   )
   const [callStartTime, setCallStartTime] = useState<Date | null>(null)
-  const [isChatOpen, setIsChatOpen] = useState(false)
   const [rating, setRating] = useState(0)
   const [reviewComment, setReviewComment] = useState('')
   const [isReviewSubmitting, setIsReviewSubmitting] = useState(false)
@@ -148,7 +143,6 @@ export function VideoCallScreen() {
   const handleDisconnected = useCallback((duration: number) => {
     setCallDurationOnEnd(duration)
     setCallState('ended')
-    setIsChatOpen(false)
     if (currentCall) {
       persistCallEnd(currentCall.id, duration)
     }
@@ -179,7 +173,6 @@ export function VideoCallScreen() {
       setCallDurationOnEnd(duration)
     }
     setCallState('ended')
-    setIsChatOpen(false)
   }, [callStartTime, currentCall, persistCallEnd])
 
   const handleSubmitReview = useCallback(async () => {
@@ -301,81 +294,17 @@ export function VideoCallScreen() {
         />
       )}
 
-      {/* ============================================================
-          Active call — Controls overlay
-          ============================================================ */}
+      {/* Active call — Call timer overlay */}
       <AnimatePresence>
-        {callState === 'active' && (
-          <>
-            {/* Top bar with timer */}
-            <motion.div
-              key="topbar"
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 sm:px-6 py-3 bg-gradient-to-b from-black/60 to-transparent"
-            >
-              <div className="flex items-center gap-3">
-                {callStartTime && (
-                  <CallTimer startTime={callStartTime} isRunning={true} />
-                )}
-              </div>
-            </motion.div>
-
-            {/* Bottom controls */}
-            <motion.div
-              key="bottombar"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-12 bg-gradient-to-t from-black/70 to-transparent"
-            >
-              <div className="flex items-center gap-3 sm:gap-4">
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => setIsChatOpen(!isChatOpen)}
-                  className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-colors ${
-                    isChatOpen
-                      ? 'bg-rose-500 text-white'
-                      : 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm'
-                  }`}
-                >
-                  <MessageSquare className="w-5 h-5" />
-                </motion.button>
-
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={handleEndCall}
-                  className="w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center shadow-lg shadow-red-500/30 transition-colors"
-                >
-                  <PhoneOff className="w-7 h-7 text-white" />
-                </motion.button>
-
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => {
-                    // Toggle audio via WebRTC component
-                    const container = document.querySelector('[data-webrtc-container]')
-                    if (container) {
-                      const btn = container.querySelector('[data-action="toggle-audio"]') as HTMLElement
-                      btn?.click()
-                    }
-                  }}
-                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm flex items-center justify-center transition-colors"
-                >
-                  <Mic className="w-5 h-5" />
-                </motion.button>
-              </div>
-            </motion.div>
-
-            {/* Chat Panel */}
-            <ChatPanel
-              open={isChatOpen}
-              onClose={() => setIsChatOpen(false)}
-              otherParticipantName={otherPersonName}
-              otherParticipantId={otherPersonId}
-            />
-          </>
+        {callState === 'active' && callStartTime && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="absolute top-0 left-0 right-0 z-20 flex items-center justify-center px-4 py-3 bg-gradient-to-b from-black/30 to-transparent pointer-events-none"
+          >
+            <CallTimer startTime={callStartTime} isRunning={true} />
+          </motion.div>
         )}
       </AnimatePresence>
 

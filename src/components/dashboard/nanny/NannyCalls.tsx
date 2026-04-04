@@ -91,16 +91,22 @@ export default function NannyCalls() {
     try {
       await apiPut(`/api/calls/${call.id}/status`, { status: 'ACCEPTED' });
 
-      // Notify parent via socket that call was accepted
+      // Notify parent via socket that call was accepted (with auth!)
       try {
         const { io } = await import('socket.io-client');
-        const socket = io('/?XTransformPort=3003', { path: '/socket.io' });
-        socket.emit('call-accepted', {
-          callId: call.id,
-          toUserId: call.parentId,
-          roomName: call.callRoomId || null,
+        const socket = io('/?XTransformPort=3003', {
+          path: '/socket.io',
+          transports: ['websocket', 'polling'],
         });
-        setTimeout(() => socket.disconnect(), 1000);
+        socket.on('connect', () => {
+          socket.emit('auth', { userId: user?.id, role: user?.role });
+          socket.emit('call-accepted', {
+            callId: call.id,
+            toUserId: call.parentId,
+            roomName: call.callRoomId || null,
+          });
+          setTimeout(() => socket.disconnect(), 1500);
+        });
       } catch {
         // Non-critical: socket notification failed, call still works
       }
@@ -111,7 +117,7 @@ export default function NannyCalls() {
       // Auto-join the video call after accepting
       setTimeout(() => {
         startCall(call);
-      }, 500);
+      }, 800);
     } catch {
       toast.error('Failed to accept call');
     }
@@ -125,15 +131,21 @@ export default function NannyCalls() {
     try {
       await apiPut(`/api/calls/${call.id}/status`, { status: 'CANCELLED' });
 
-      // Notify parent via socket that call was rejected
+      // Notify parent via socket that call was rejected (with auth!)
       try {
         const { io } = await import('socket.io-client');
-        const socket = io('/?XTransformPort=3003', { path: '/socket.io' });
-        socket.emit('call-rejected', {
-          callId: call.id,
-          toUserId: call.parentId,
+        const socket = io('/?XTransformPort=3003', {
+          path: '/socket.io',
+          transports: ['websocket', 'polling'],
         });
-        setTimeout(() => socket.disconnect(), 1000);
+        socket.on('connect', () => {
+          socket.emit('auth', { userId: user?.id, role: user?.role });
+          socket.emit('call-rejected', {
+            callId: call.id,
+            toUserId: call.parentId,
+          });
+          setTimeout(() => socket.disconnect(), 1500);
+        });
       } catch {
         // Non-critical
       }

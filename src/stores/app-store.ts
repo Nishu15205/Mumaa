@@ -47,7 +47,9 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
       currentCall: call,
       showVideoCall: true,
       incomingCall: null,
-      waitingForNanny: false,
+      // NOTE: Do NOT reset waitingForNanny here.
+      // The caller must manage it explicitly (e.g. setWaitingForNanny(true) before startCall for parent,
+      // or let it stay false for nanny joining an accepted call).
     }),
 
   endCall: () =>
