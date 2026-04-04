@@ -36,6 +36,7 @@ export interface NannyProfile {
   rating: number;
   totalSessions: number;
   totalEarnings: number;
+  paidEarnings: number;
   languages: string;
   certifications: string;
   ageGroup: string;
@@ -160,6 +161,7 @@ export type AppView =
   | 'admin-dashboard'
   | 'pricing'
   | 'profile'
+  | 'apply-nanny'
   | 'terms'
   | 'privacy'
   | 'about';

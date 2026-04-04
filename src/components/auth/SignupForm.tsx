@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Heart, Eye, EyeOff, Loader2, ArrowLeft, X, User, Baby, CheckCircle } from 'lucide-react';
+import { Heart, Eye, EyeOff, Loader2, ArrowLeft, X, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,71 +10,24 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import type { AppView } from '@/types';
-import OnboardingFlow from '@/components/onboarding/OnboardingFlow';
-
-const ROLE_INFO = {
-  PARENT: {
-    icon: User,
-    label: "I'm a Parent",
-    tagline: 'Find trusted nannies for your children',
-    color: 'from-emerald-500 to-teal-600',
-    activeBg: 'border-emerald-300 bg-emerald-50',
-    inactiveBg: 'border-gray-200 bg-white hover:border-gray-300',
-    activeText: 'text-emerald-700',
-    features: [
-      'Browse & book verified nannies',
-      'Instant & scheduled video calls',
-      '7-day free trial on signup',
-    ],
-  },
-  NANNY: {
-    icon: Baby,
-    label: "I'm a Nanny",
-    tagline: 'Connect with families & earn income',
-    color: 'from-violet-500 to-purple-600',
-    activeBg: 'border-violet-300 bg-violet-50',
-    inactiveBg: 'border-gray-200 bg-white hover:border-gray-300',
-    activeText: 'text-violet-700',
-    features: [
-      'Create your professional profile',
-      'Set your own availability & rates',
-      'Track earnings & build reputation',
-    ],
-  },
-};
 
 export default function SignupForm() {
-  const [role, setRole] = useState<'PARENT' | 'NANNY'>('PARENT');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Common fields
+  // Parent fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
-  // Parent fields
   const [childrenCount, setChildrenCount] = useState('');
   const [childrenAges, setChildrenAges] = useState('');
 
-  // Nanny fields
-  const [experience, setExperience] = useState('');
-  const [skills, setSkills] = useState('');
-  const [hourlyRate, setHourlyRate] = useState('');
-  const [languages, setLanguages] = useState('');
-  const [certifications, setCertifications] = useState('');
-
   const { setUser, setSubscription } = useAuthStore();
   const { setCurrentView } = useAppStore();
-
-  // Onboarding state
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingRole, setOnboardingRole] = useState<'PARENT' | 'NANNY'>('PARENT');
-  const [onboardingName, setOnboardingName] = useState('');
 
   const validate = (): boolean => {
     setError('');
@@ -113,19 +66,10 @@ export default function SignupForm() {
         email: email.trim(),
         phone: phone.trim(),
         password,
-        role,
+        role: 'PARENT',
+        childrenCount,
+        childrenAges,
       };
-
-      if (role === 'PARENT') {
-        body.childrenCount = childrenCount;
-        body.childrenAges = childrenAges;
-      } else {
-        body.experience = experience;
-        body.skills = skills;
-        body.hourlyRate = hourlyRate;
-        body.languages = languages;
-        body.certifications = certifications;
-      }
 
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
@@ -145,37 +89,13 @@ export default function SignupForm() {
         setSubscription(data.subscription);
       }
 
-      // Trigger onboarding after signup
-      setOnboardingRole(role);
-      setOnboardingName(data.user.name || name);
-      setShowOnboarding(true);
+      setCurrentView('parent-dashboard');
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
-
-  // Onboarding complete handler
-  const handleOnboardingComplete = () => {
-    setShowOnboarding(false);
-    const viewMap: Record<string, AppView> = {
-      PARENT: 'parent-dashboard',
-      NANNY: 'nanny-dashboard',
-    };
-    setCurrentView(viewMap[onboardingRole] || 'landing');
-  };
-
-  // Show onboarding flow if triggered
-  if (showOnboarding) {
-    return (
-      <OnboardingFlow
-        role={onboardingRole}
-        userName={onboardingName}
-        onComplete={handleOnboardingComplete}
-      />
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 px-4 py-12">
@@ -211,50 +131,20 @@ export default function SignupForm() {
             Create Your Account
           </h1>
           <p className="text-sm text-gray-500 text-center mb-6">
-            Join thousands of parents and nannies on Mumaa
+            Join thousands of parents on Mumaa
           </p>
 
-          {/* Role Selection Cards */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            {(['PARENT', 'NANNY'] as const).map((r) => {
-              const info = ROLE_INFO[r];
-              const Icon = info.icon;
-              const isActive = role === r;
-              return (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setRole(r)}
-                  className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 ${isActive ? info.activeBg : info.inactiveBg}`}
-                >
-                  {isActive && (
-                    <div className="absolute top-2 right-2">
-                      <CheckCircle className={`w-4 h-4 ${info.activeText}`} />
-                    </div>
-                  )}
-                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${info.color} flex items-center justify-center`}>
-                    <Icon className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="text-center">
-                    <p className={`text-sm font-semibold ${isActive ? info.activeText : 'text-gray-700'}`}>{info.label}</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">{info.tagline}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Role Features Info */}
-          <div className="mb-5 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-100">
-            <p className="text-[11px] text-gray-500 font-medium mb-1.5">As a {role === 'PARENT' ? 'Parent' : 'Nanny'} you get:</p>
-            <ul className="space-y-1">
-              {ROLE_INFO[role].features.map((f, i) => (
-                <li key={i} className="text-[11px] text-gray-600 flex items-center gap-1.5">
-                  <span className="w-1 h-1 rounded-full bg-rose-400 flex-shrink-0" />
-                  {f}
-                </li>
-              ))}
-            </ul>
+          {/* Parent badge */}
+          <div className="mb-6 flex justify-center">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-50 border border-emerald-200">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                <User className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-emerald-700">Parent Account</p>
+                <p className="text-[11px] text-emerald-600">Find trusted nannies for your children</p>
+              </div>
+            </div>
           </div>
 
           {/* Error */}
@@ -269,7 +159,6 @@ export default function SignupForm() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Common Fields */}
             <div className="space-y-1.5">
               <Label className="text-sm font-medium text-gray-700">
                 Full Name <span className="text-rose-500">*</span>
@@ -350,113 +239,32 @@ export default function SignupForm() {
               </div>
             </div>
 
-            {/* Parent-specific fields */}
-            {role === 'PARENT' && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="space-y-4"
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-gray-700">Number of Children</Label>
-                    <Input
-                      type="number"
-                      placeholder="e.g., 1"
-                      min="0"
-                      max="10"
-                      value={childrenCount}
-                      onChange={(e) => setChildrenCount(e.target.value)}
-                      className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                      disabled={loading}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-gray-700">Children&apos;s Ages</Label>
-                    <Input
-                      placeholder="e.g., 2, 5"
-                      value={childrenAges}
-                      onChange={(e) => setChildrenAges(e.target.value)}
-                      className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Nanny-specific fields */}
-            {role === 'NANNY' && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="space-y-4"
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-gray-700">Years of Experience</Label>
-                    <Input
-                      type="number"
-                      placeholder="e.g., 5"
-                      min="0"
-                      value={experience}
-                      onChange={(e) => setExperience(e.target.value)}
-                      className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                      disabled={loading}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-gray-700">Hourly Rate (₹)</Label>
-                    <Input
-                      type="number"
-                      placeholder="e.g., 500"
-                      min="0"
-                      value={hourlyRate}
-                      onChange={(e) => setHourlyRate(e.target.value)}
-                      className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-gray-700">Skills</Label>
-                  <Input
-                    placeholder="e.g., newborn care, sleep training, toddler activities"
-                    value={skills}
-                    onChange={(e) => setSkills(e.target.value)}
-                    className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                    disabled={loading}
-                  />
-                  <p className="text-xs text-gray-400">Separate multiple skills with commas</p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-gray-700">Languages</Label>
-                    <Input
-                      placeholder="e.g., Hindi, English"
-                      value={languages}
-                      onChange={(e) => setLanguages(e.target.value)}
-                      className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                      disabled={loading}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm font-medium text-gray-700">Certifications</Label>
-                    <Input
-                      placeholder="e.g., CPR, First Aid"
-                      value={certifications}
-                      onChange={(e) => setCertifications(e.target.value)}
-                      className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
+            {/* Children info */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">Number of Children</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g., 1"
+                  min="0"
+                  max="10"
+                  value={childrenCount}
+                  onChange={(e) => setChildrenCount(e.target.value)}
+                  className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
+                  disabled={loading}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium text-gray-700">Children&apos;s Ages</Label>
+                <Input
+                  placeholder="e.g., 2, 5"
+                  value={childrenAges}
+                  onChange={(e) => setChildrenAges(e.target.value)}
+                  className="h-11 rounded-xl border-gray-200 focus:border-rose-400 focus:ring-rose-400/20"
+                  disabled={loading}
+                />
+              </div>
+            </div>
 
             {/* Terms */}
             <div className="flex items-start gap-3 pt-2">
@@ -490,13 +298,13 @@ export default function SignupForm() {
                   Creating account...
                 </>
               ) : (
-                `Create ${role === 'PARENT' ? 'Parent' : 'Nanny'} Account`
+                'Create Parent Account'
               )}
             </Button>
           </form>
 
           {/* Login link */}
-          <div className="mt-6 text-center">
+          <div className="mt-6 text-center space-y-2">
             <p className="text-sm text-gray-600">
               Already have an account?{' '}
               <button
@@ -504,6 +312,15 @@ export default function SignupForm() {
                 className="text-rose-600 hover:text-rose-700 font-semibold"
               >
                 Log In
+              </button>
+            </p>
+            <p className="text-sm text-gray-600">
+              Are you a nanny?{' '}
+              <button
+                onClick={() => setCurrentView('apply-nanny')}
+                className="text-violet-600 hover:text-violet-700 font-semibold"
+              >
+                Apply Here
               </button>
             </p>
           </div>

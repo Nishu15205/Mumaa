@@ -4,6 +4,24 @@ import { checkRateLimit } from '@/lib/rate-limit';
 
 export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
+    const all = searchParams.get('all');
+    const skill = searchParams.get('skill');
+    const search = searchParams.get('search');
+    const minRating = searchParams.get('minRating');
+    const language = searchParams.get('language');
+    const available = searchParams.get('available');
+
+    // ── ?all=true — Simple list of all nannies for dropdowns ───────
+    if (all === 'true') {
+      const nannies = await db.user.findMany({
+        where: { role: 'NANNY', isActive: true },
+        select: { id: true, name: true, email: true },
+        orderBy: { name: 'asc' },
+      });
+      return NextResponse.json({ nannies });
+    }
+
     // Rate limiting check (search: 30 req/min per IP)
     const { success, headers } = await checkRateLimit(req, 'search');
     if (!success) {
@@ -12,13 +30,6 @@ export async function GET(req: NextRequest) {
         { status: 429, headers }
       );
     }
-
-    const { searchParams } = new URL(req.url);
-    const skill = searchParams.get('skill');
-    const search = searchParams.get('search');
-    const minRating = searchParams.get('minRating');
-    const language = searchParams.get('language');
-    const available = searchParams.get('available');
 
     const where: any = {
       user: { isActive: true },

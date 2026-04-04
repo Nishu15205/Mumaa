@@ -27,6 +27,7 @@ const navLinks = [
   { label: 'Features', href: '#features' },
   { label: 'How It Works', href: '#how-it-works' },
   { label: 'Pricing', href: '#pricing' },
+  { label: 'Apply as Nanny', href: 'apply-nanny' },
 ];
 
 export default function Navbar() {
@@ -48,6 +49,10 @@ export default function Navbar() {
 
   const handleScrollTo = (href: string) => {
     setMobileOpen(false);
+    if (href === 'apply-nanny') {
+      setCurrentView('apply-nanny' as AppView);
+      return;
+    }
     const el = document.querySelector(href);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });

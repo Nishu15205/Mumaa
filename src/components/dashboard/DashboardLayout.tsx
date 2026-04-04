@@ -21,6 +21,8 @@ import {
   Baby,
   UserCheck,
   Star,
+  ClipboardList,
+  Wallet,
 } from 'lucide-react';
 import NotificationPanel from '@/components/dashboard/NotificationPanel';
 import { useAuthStore } from '@/stores/auth-store';
@@ -69,6 +71,8 @@ const adminNav: NavItem[] = [
   { id: 'admin-dashboard', label: 'Overview', icon: <BarChart3 className="h-5 w-5" /> },
   { id: 'admin-dashboard', label: 'Users', icon: <Users className="h-5 w-5" /> },
   { id: 'admin-dashboard', label: 'Call Sessions', icon: <Phone className="h-5 w-5" /> },
+  { id: 'admin-dashboard', label: 'Applications', icon: <ClipboardList className="h-5 w-5" /> },
+  { id: 'admin-dashboard', label: 'Payments', icon: <Wallet className="h-5 w-5" /> },
   { id: 'admin-dashboard', label: 'Analytics', icon: <BarChart3 className="h-5 w-5" /> },
 ];
 
@@ -85,7 +89,7 @@ export default function DashboardLayout({ children, activePage = 'dashboard', on
   const [searchQuery, setSearchQuery] = useState('');
 
   const navItems = user?.role === 'ADMIN' ? adminNav : user?.role === 'NANNY' ? nannyNav : parentNav;
-  const navLabels = user?.role === 'ADMIN' ? ['overview', 'users', 'calls', 'analytics'] : user?.role === 'NANNY' ? ['dashboard', 'calls', 'availability', 'earnings', 'settings'] : ['dashboard', 'find', 'calls', 'schedule', 'subscription', 'settings'];
+  const navLabels = user?.role === 'ADMIN' ? ['overview', 'users', 'calls', 'applications', 'payments', 'analytics'] : user?.role === 'NANNY' ? ['dashboard', 'calls', 'availability', 'earnings', 'settings'] : ['dashboard', 'find', 'calls', 'schedule', 'subscription', 'settings'];
 
   const getInitials = (name: string) => {
     return name

@@ -176,3 +176,89 @@ Stage Summary:
 - Auth flow: New users sign up with role → auto-logged in → onboarding → dashboard
 - Existing users: email + password → auto-redirect to correct dashboard based on DB role
 - All 3 login types verified working via API tests
+
+---
+## Task ID: 6 - main
+### Work Task
+Create three new components: ApplyAsNanny (public form), AdminApplications (admin review), AdminPayments (admin nanny payment management). Wire them into the app with API routes, navigation, and routing.
+
+### Work Summary
+**Components Created:**
+1. `/src/components/common/ApplyAsNanny.tsx` — Full-screen centered nanny application form with rose/pink gradient background, decorative blur blobs, Heart logo, all required fields (name, email, phone, experience, skills, hourly rate, languages, certifications, bio), terms checkbox, loading state, and success screen with next-steps info. Uses plain `fetch` for public POST to `/api/nanny-apply`.
+
+2. `/src/components/dashboard/admin/AdminApplications.tsx` — Admin page to manage nanny applications. Tab filters (All/Pending/Approved/Rejected), application cards with status badges (amber/emerald/red), skills badges, details grid, relative time formatting, Approve/Reject action buttons for pending, AlertDialog with reason input for rejection, uses `apiGet`/`apiPut` with auth headers.
+
+3. `/src/components/dashboard/admin/AdminPayments.tsx` — Admin page for manual nanny payments. Stats cards (Paid This Month, Paid All Time, Total Payments), Pay Nanny form (nanny dropdown, amount, method, note), Payment History table (Date, Nanny, Amount, Method, Note, Paid By), uses `apiGet`/`apiPost` with auth headers.
+
+**API Routes Updated:**
+- `/api/nanny-apply/[id]/route.ts` — Updated PUT to accept `adminId` from Authorization header as fallback to body param. Also accepts `reason` field in addition to `rejectReason`.
+- `/api/admin/payments/route.ts` — Updated GET to return computed stats (totalThisMonth, totalAllTime, totalPayments) alongside payments. Updated POST to accept `adminId` from Authorization header. Added notification creation for nanny on payment.
+- `/api/nannies/route.ts` — Added `?all=true` query parameter support to return simple nanny list (id, name, email) for dropdown usage.
+
+**App Integration:**
+- `src/app/page.tsx` — Added imports, AdminDashboardRouter cases for 'applications' and 'payments', public view rendering for 'apply-nanny'.
+- `src/components/dashboard/DashboardLayout.tsx` — Added ClipboardList and Wallet icons, two new admin nav items (Applications, Payments), updated navLabels array.
+- `src/types/index.ts` — Added 'apply-nanny' to AppView type.
+
+**Result:** 0 lint errors, dev server compiling successfully in ~200ms. All three features fully functional and integrated.
+
+---
+## Task ID: 6 - API Routes: Nanny Applications, Admin Payments, Nanny Earnings
+### Work Task
+Create 4 new API routes for the MUMAA platform: nanny application submission/listing, application review (approve/reject), admin payment management, and nanny earnings breakdown.
+
+### Work Summary
+
+**Files created:**
+1. `src/app/api/nanny-apply/route.ts` — POST (submit application) + GET (list all, admin)
+2. `src/app/api/nanny-apply/[id]/route.ts` — PUT (admin approve/reject)
+3. `src/app/api/admin/payments/route.ts` — GET (list payments) + POST (record payment)
+4. `src/app/api/admin/nanny-earnings/[id]/route.ts` — GET (earnings breakdown)
+
+**Schema change:**
+- Made `applicant` relation on `NannyApplication` optional (`User?`) to allow applications from emails not yet registered as users. Pushed to DB with `db:push`.
+
+**Route details:**
+- **POST /api/nanny-apply**: Validates email/name, checks email format, prevents duplicate Users and PENDING spam, creates NannyApplication with status PENDING.
+- **GET /api/nanny-apply**: Returns all applications ordered by createdAt desc, includes approvedUser info.
+- **PUT /api/nanny-apply/[id]**: Admin reviews application. APPROVE creates User (role=NANNY, temp bcrypt password), NannyProfile, FREE subscription with 7-day trial, updates application, creates admin notification. REJECT sets status/reviewer/reason.
+- **GET /api/admin/payments**: Lists all PaymentRecords with nanny and admin user info.
+- **POST /api/admin/payments**: Validates admin role, nanny existence, amount > 0. Creates PaymentRecord, increments NannyProfile.paidEarnings.
+- **GET /api/admin/nanny-earnings/[id]**: Aggregates totalEarnings from completed CallSessions, totalPaid from PaymentRecords, derives pending = totalEarnings - paidEarnings.
+
+**Quality:** 0 lint errors, dev server compiles cleanly.
+---
+Task ID: 6
+Agent: Main
+Task: Remove fake data, add Apply as Nanny flow, admin manual payments, Basic plan call limits
+
+Work Log:
+- Removed all fake/seed data (wiped database clean)
+- Removed demo login section from LoginForm
+- Removed "I'm a Nanny" from SignupForm (only Parent signup now)
+- Added NannyApplication model to Prisma (email, name, skills, status PENDING/APPROVED/REJECTED)
+- Added PaymentRecord model to Prisma (nannyId, amount, method, paidBy admin)
+- Added paidEarnings field to NannyProfile, callsUsedToday + lastCallReset to Subscription
+- Created POST/GET /api/nanny-apply (submit + list applications)
+- Created PUT /api/nanny-apply/[id] (approve creates User+NannyProfile+Subscription, reject stores reason)
+- Created GET/POST /api/admin/payments (list + manual payment with nanny notification)
+- Created GET /api/admin/nanny-earnings/[id] (pending vs paid earnings)
+- Created ApplyAsNanny.tsx public page (full form with success screen)
+- Created AdminApplications.tsx (approve/reject with tabs and reason dialog)
+- Created AdminPayments.tsx (pay nanny form + payment history table)
+- Updated NannyEarnings.tsx to show ₹0 until admin pays (shows paidEarnings + pending banner)
+- Updated instant call API: BASIC plan = 5 calls/day max, 15 min per call
+- Updated DashboardLayout admin nav: added Applications + Payments items
+- Updated Navbar: added "Apply as Nanny" link in nav
+- Updated page.tsx: added routes for apply-nanny, applications, payments
+- Updated types/index.ts: added apply-nanny to AppView, paidEarnings to NannyProfile
+- Admin credentials: admin@mumaa.in / admin123 (fresh DB)
+- 0 lint errors, all APIs tested working
+
+Stage Summary:
+- Fake data completely removed, fresh database
+- Nanny signup flow: Apply as Nanny page → admin reviews → approve creates account
+- Admin manual payment: Admin pays nanny → nanny sees ₹0 until paid
+- Basic plan: 5 free calls/day, each max 15 minutes
+- PRO plan: unlimited calls, unlimited duration
+- FREE plan: no instant calls (upgrade required)

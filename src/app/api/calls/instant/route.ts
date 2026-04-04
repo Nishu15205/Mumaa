@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/lib/db';
 
+const BASIC_DAILY_LIMIT = 5;
+const BASIC_CALL_MAX_SECONDS = 15 * 60; // 15 minutes
+
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -26,7 +35,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Nanny not found' }, { status: 404 });
     }
 
-    // Generate a short, URL-safe room ID in the format: mumaa-{uuid-shortened}
+    // Check subscription and call limits
+    const subscription = await db.subscription.findFirst({
+      where: { userId: parentId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const plan = subscription?.plan || 'FREE';
+
+    if (plan === 'BASIC') {
+      // Check daily call limit
+      const now = new Date();
+      let callsUsedToday = 0;
+
+      if (subscription?.lastCallReset && isSameDay(new Date(subscription.lastCallReset), now)) {
+        callsUsedToday = subscription.callsUsedToday || 0;
+      } else {
+        // Reset daily counter
+        await db.subscription.update({
+          where: { id: subscription!.id },
+          data: { callsUsedToday: 0, lastCallReset: now },
+        });
+      }
+
+      if (callsUsedToday >= BASIC_DAILY_LIMIT) {
+        return NextResponse.json(
+          {
+            error: `You have reached your daily limit of ${BASIC_DAILY_LIMIT} calls on the Basic plan. Upgrade to Pro for unlimited calls.`,
+            code: 'DAILY_LIMIT_REACHED',
+            callsUsedToday,
+            dailyLimit: BASIC_DAILY_LIMIT,
+          },
+          { status: 429 }
+        );
+      }
+
+      // Increment daily call counter
+      await db.subscription.update({
+        where: { id: subscription!.id },
+        data: { callsUsedToday: callsUsedToday + 1 },
+      });
+    }
+
+    // Generate a short, URL-safe room ID
     const rawId = uuidv4();
     const shortId = rawId.replace(/-/g, '').slice(0, 12);
     const callRoomId = `mumaa-${shortId}`;
@@ -38,6 +89,8 @@ export async function POST(req: NextRequest) {
         type: 'INSTANT',
         status: 'PENDING',
         callRoomId,
+        // Store max duration in notes for Basic plan
+        ...(plan === 'BASIC' ? { notes: `MAX_DURATION:${BASIC_CALL_MAX_SECONDS}` } : {}),
       },
       include: {
         parent: {
@@ -72,7 +125,15 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(
-      { call, message: 'Instant call request created' },
+      {
+        call,
+        message: 'Instant call request created',
+        plan,
+        ...(plan === 'BASIC' ? {
+          maxDurationSeconds: BASIC_CALL_MAX_SECONDS,
+          callsRemaining: BASIC_DAILY_LIMIT - (subscription?.callsUsedToday || 0),
+        } : {}),
+      },
       { status: 201 }
     );
   } catch (error: any) {

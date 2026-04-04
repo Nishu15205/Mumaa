@@ -28,11 +28,14 @@ import AdminDashboard from '@/components/dashboard/admin/AdminDashboard';
 import AdminAnalytics from '@/components/dashboard/admin/AdminAnalytics';
 import AdminUsers from '@/components/dashboard/admin/AdminUsers';
 import AdminCalls from '@/components/dashboard/admin/AdminCalls';
+import AdminApplications from '@/components/dashboard/admin/AdminApplications';
+import AdminPayments from '@/components/dashboard/admin/AdminPayments';
 
 import Settings from '@/components/dashboard/Settings';
 import { VideoCallScreen } from '@/components/videocall/VideoCallScreen';
 import { IncomingCallDialog } from '@/components/videocall/IncomingCallDialog';
 import LegalPages from '@/components/common/LegalPages';
+import ApplyAsNanny from '@/components/common/ApplyAsNanny';
 
 function LoadingScreen() {
   return (
@@ -93,6 +96,10 @@ function AdminDashboardRouter({ activePage }: { activePage: string }) {
       return <AdminCalls />;
     case 'analytics':
       return <AdminAnalytics />;
+    case 'applications':
+      return <AdminApplications />;
+    case 'payments':
+      return <AdminPayments />;
     default:
       return <AdminDashboard />;
   }
@@ -155,7 +162,7 @@ export default function Home() {
         setCurrentView(view);
       }
     } else if (!isAuthenticated) {
-      if (currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup' && currentView !== 'forgot-password' && currentView !== 'pricing' && currentView !== 'terms' && currentView !== 'privacy' && currentView !== 'about') {
+      if (currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup' && currentView !== 'forgot-password' && currentView !== 'pricing' && currentView !== 'terms' && currentView !== 'privacy' && currentView !== 'about' && currentView !== 'apply-nanny') {
         setCurrentView('landing');
       }
     }
@@ -230,7 +237,7 @@ export default function Home() {
       {!showVideoCall && (
         <AnimatePresence mode="wait">
           {/* Public Pages */}
-          {(!isAuthenticated || currentView === 'landing' || currentView === 'login' || currentView === 'signup' || currentView === 'forgot-password' || currentView === 'pricing' || currentView === 'terms' || currentView === 'privacy' || currentView === 'about') && (
+          {(!isAuthenticated || currentView === 'landing' || currentView === 'login' || currentView === 'signup' || currentView === 'forgot-password' || currentView === 'pricing' || currentView === 'terms' || currentView === 'privacy' || currentView === 'about' || currentView === 'apply-nanny') && (
             <motion.div
               key={currentView}
               initial={{ opacity: 0, y: 20 }}
@@ -265,6 +272,7 @@ export default function Home() {
                   onBack={() => setCurrentView('landing')}
                 />
               )}
+              {currentView === 'apply-nanny' && <ApplyAsNanny />}
             </motion.div>
           )}
 
