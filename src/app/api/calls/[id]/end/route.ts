@@ -7,6 +7,8 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
+    const body = await req.json();
+    const { duration: frontendDuration } = body;
 
     const call = await db.callSession.findUnique({
       where: { id },
@@ -27,16 +29,18 @@ export async function PUT(
       );
     }
 
-    if (call.status !== 'ACTIVE') {
-      return NextResponse.json(
-        { error: 'Call is not currently active' },
-        { status: 400 }
-      );
-    }
-
     const endedAt = new Date();
     const startedAt = call.startedAt ? new Date(call.startedAt) : endedAt;
-    const durationSeconds = Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000);
+
+    // Use the duration from the frontend if provided (more accurate from Jitsi),
+    // otherwise fall back to server-side calculation
+    let durationSeconds: number;
+    if (typeof frontendDuration === 'number' && frontendDuration > 0) {
+      durationSeconds = Math.floor(frontendDuration);
+    } else {
+      durationSeconds = Math.floor((endedAt.getTime() - startedAt.getTime()) / 1000);
+    }
+
     const durationHours = durationSeconds / 3600;
 
     // Calculate price: nanny hourlyRate * duration in hours
@@ -72,21 +76,26 @@ export async function PUT(
       });
     }
 
-    // Create notifications
+    // Create notifications for both parent and nanny
+    const durationMinutes = Math.floor(durationSeconds / 60);
+    const durationDisplay = durationMinutes > 0
+      ? `${durationMinutes} minute${durationMinutes !== 1 ? 's' : ''}`
+      : `${durationSeconds} second${durationSeconds !== 1 ? 's' : ''}`;
+
     await db.notification.createMany({
       data: [
         {
           userId: call.parentId,
           type: 'CALL_COMPLETED',
           title: 'Call Completed',
-          message: `Your call with ${call.nanny.name} has ended. Duration: ${Math.floor(durationSeconds / 60)} minutes. Cost: ₹${price}`,
+          message: `Your call with ${call.nanny.name} has ended. Duration: ${durationDisplay}. Cost: ₹${price}`,
           data: JSON.stringify({ callId: id, duration: durationSeconds, price }),
         },
         {
           userId: call.nannyId,
           type: 'CALL_COMPLETED',
           title: 'Call Completed',
-          message: `Your call with ${call.parent.name} has ended. Duration: ${Math.floor(durationSeconds / 60)} minutes. Earnings: ₹${price}`,
+          message: `Your call with ${call.parent.name} has ended. Duration: ${durationDisplay}. Earnings: ₹${price}`,
           data: JSON.stringify({ callId: id, duration: durationSeconds, price }),
         },
       ],

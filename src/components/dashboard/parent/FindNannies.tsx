@@ -78,7 +78,8 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
       params.append('available', 'true');
 
       const res = await apiGet<{ nannies: NannyWithUser[] }>(`/api/nannies?${params.toString()}`);
-      setNannies(res.nannies || []);
+      const nanniesList = Array.isArray(res.nannies) ? res.nannies : [];
+      setNannies(nanniesList);
     } catch {
       toast.error('Failed to load nannies');
     } finally {

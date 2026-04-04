@@ -26,7 +26,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Nanny not found' }, { status: 404 });
     }
 
-    const callRoomId = uuidv4();
+    // Generate a short, URL-safe room ID in the format: mumaa-{uuid-shortened}
+    const rawId = uuidv4();
+    const shortId = rawId.replace(/-/g, '').slice(0, 12);
+    const callRoomId = `mumaa-${shortId}`;
 
     const call = await db.callSession.create({
       data: {

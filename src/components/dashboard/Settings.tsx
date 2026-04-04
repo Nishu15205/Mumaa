@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   User,
@@ -16,6 +16,9 @@ import {
   Save,
   Loader2,
   AlertTriangle,
+  Upload,
+  X,
+  CheckCircle2,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth-store';
 import { apiPut } from '@/lib/api';
@@ -27,7 +30,8 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Progress } from '@/components/ui/progress';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +44,71 @@ import {
 } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+// ---------- Avatar Upload Constants ----------
+const MAX_AVATAR_SIZE = 5 * 1024 * 1024; // 5MB
+const ALLOWED_AVATAR_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function uploadFileWithProgress(
+  file: File,
+  folder: string,
+  onProgress: (percent: number) => void
+): Promise<{ url: string; key: string; size: number }> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('folder', folder);
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        onProgress(percent);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.url && data.key) {
+            resolve({ url: data.url, key: data.key, size: data.size });
+          } else {
+            reject(new Error(data.error || 'Upload failed'));
+          }
+        } catch {
+          reject(new Error('Invalid response from server'));
+        }
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          reject(new Error(data.error || `Upload failed with status ${xhr.status}`));
+        } catch {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error during upload'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'));
+    });
+
+    xhr.open('POST', '/api/upload');
+    xhr.send(formData);
+  });
+}
 
 export default function Settings() {
   const { user, setUser, logout } = useAuthStore();
@@ -60,6 +129,13 @@ export default function Settings() {
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+  // Avatar upload state
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (user) {
       setName(user.name);
@@ -68,7 +144,13 @@ export default function Settings() {
     }
   }, [user]);
 
-  const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+  const getInitials = (name: string) =>
+    name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
 
   const handleSaveProfile = async () => {
     if (!user) return;
@@ -87,6 +169,108 @@ export default function Settings() {
       setSaving(false);
     }
   };
+
+  // ---------- Avatar Upload Logic ----------
+
+  const validateAvatarFile = useCallback((file: File): string | null => {
+    if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
+      return `Unsupported file type. Allowed: ${ALLOWED_EXTENSIONS.join(', ')}`;
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      return `Unsupported file extension: .${ext}`;
+    }
+    if (file.size > MAX_AVATAR_SIZE) {
+      return `File too large (${formatFileSize(file.size)}). Maximum: ${formatFileSize(MAX_AVATAR_SIZE)}`;
+    }
+    if (file.size === 0) {
+      return 'File is empty';
+    }
+    return null;
+  }, []);
+
+  const processFile = useCallback(
+    (file: File) => {
+      const error = validateAvatarFile(file);
+      if (error) {
+        toast.error(error);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setAvatarPreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+
+      handleAvatarUpload(file);
+    },
+    [validateAvatarFile]
+  );
+
+  const handleAvatarUpload = useCallback(async (file: File) => {
+    if (!user) return;
+
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      const result = await uploadFileWithProgress(file, 'avatars', setUploadProgress);
+
+      const updated = await apiPut<{ user: typeof user }>('/api/auth/profile', {
+        avatar: result.url,
+      });
+      setUser(updated.user);
+      setAvatarPreview(null);
+      toast.success('Avatar updated successfully');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to upload avatar';
+      setAvatarPreview(null);
+      toast.error(message);
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  }, [user, setUser]);
+
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        processFile(file);
+      }
+      e.target.value = '';
+    },
+    [processFile]
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+
+      const file = e.dataTransfer.files?.[0];
+      if (file) {
+        processFile(file);
+      }
+    },
+    [processFile]
+  );
+
+  // ---------- Password & Delete ----------
 
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword || !confirmPassword) {
@@ -132,6 +316,8 @@ export default function Settings() {
     );
   }
 
+  const displayAvatar = avatarPreview || user.avatar;
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
@@ -147,24 +333,172 @@ export default function Settings() {
             Profile Settings
           </h2>
 
-          {/* Avatar */}
-          <div className="flex items-center gap-4 mb-6">
-            <div className="relative">
-              <Avatar className="h-20 w-20">
-                <AvatarFallback className="bg-rose-100 text-rose-700 text-xl font-bold">
+          {/* Avatar Upload Section */}
+          <div className="flex items-start gap-4 mb-6">
+            <div
+              className="relative group cursor-pointer"
+              onClick={() => !isUploading && fileInputRef.current?.click()}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (!isUploading) fileInputRef.current?.click();
+                }
+              }}
+              aria-label="Upload profile photo"
+            >
+              <Avatar className={cn(
+                'h-24 w-24 transition-all duration-200',
+                isDragging && 'ring-4 ring-rose-400 ring-offset-2 scale-105',
+                !isUploading && 'group-hover:ring-2 group-hover:ring-rose-300 group-hover:ring-offset-2'
+              )}>
+                {displayAvatar ? (
+                  <AvatarImage src={displayAvatar} alt={user.name} className="object-cover" />
+                ) : null}
+                <AvatarFallback className="bg-rose-100 text-rose-700 text-2xl font-bold">
                   {getInitials(user.name)}
                 </AvatarFallback>
               </Avatar>
-              <button className="absolute bottom-0 right-0 h-8 w-8 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-md hover:bg-rose-600 transition-colors">
-                <Camera className="h-4 w-4" />
-              </button>
+
+              {!isUploading && (
+                <div className={cn(
+                  'absolute inset-0 rounded-full flex items-center justify-center transition-all duration-200',
+                  isDragging
+                    ? 'bg-rose-500/80'
+                    : 'bg-black/0 group-hover:bg-black/40'
+                )}>
+                  <div className={cn(
+                    'text-white transition-opacity duration-200',
+                    isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  )}>
+                    <Upload className="h-6 w-6" />
+                  </div>
+                </div>
+              )}
+
+              {isUploading && (
+                <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+                  <Loader2 className="h-6 w-6 text-white animate-spin" />
+                </div>
+              )}
             </div>
-            <div>
-              <p className="font-medium text-gray-900">{user.name}</p>
+
+            {/* Avatar info & controls */}
+            <div className="flex-1 pt-1">
+              <div className="flex items-center gap-2">
+                <p className="font-medium text-gray-900">{user.name}</p>
+                {isUploading && (
+                  <span className="inline-flex items-center gap-1 text-xs text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Uploading...
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-gray-500">{user.email}</p>
-              <p className="text-xs text-gray-400 mt-0.5">Member since {new Date(user.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Member since {new Date(user.createdAt).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+              </p>
+
+              <div className="flex items-center gap-2 mt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="h-8 text-xs gap-1.5 border-gray-200 text-gray-600 hover:text-gray-900"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  Change Photo
+                </Button>
+                {user.avatar && !isUploading && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const { user: currentUser } = useAuthStore.getState();
+                        if (!currentUser) return;
+                        await apiPut('/api/auth/profile', { avatar: null });
+                        setUser({ ...currentUser, avatar: null });
+                        setAvatarPreview(null);
+                        toast.success('Avatar removed');
+                      } catch {
+                        toast.error('Failed to remove avatar');
+                      }
+                    }}
+                    className="h-8 text-xs gap-1.5 text-gray-500 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                JPG, PNG, GIF or WebP. Max {formatFileSize(MAX_AVATAR_SIZE)}.
+              </p>
             </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+              onChange={handleFileSelect}
+              className="hidden"
+              disabled={isUploading}
+            />
           </div>
+
+          {/* Upload progress bar */}
+          {isUploading && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-6"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-gray-600">Uploading photo...</span>
+                <span className="text-sm font-medium text-gray-900">{uploadProgress}%</span>
+              </div>
+              <Progress value={uploadProgress} className="h-2" />
+              <p className="text-xs text-gray-400 mt-1.5">
+                Image will be resized to 800x800px and optimized automatically
+              </p>
+            </motion.div>
+          )}
+
+          {/* Preview section */}
+          {avatarPreview && !isUploading && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage src={avatarPreview} alt="Preview" className="object-cover" />
+                    <AvatarFallback className="bg-rose-100 text-rose-700">
+                      {getInitials(user.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">New photo ready</p>
+                    <p className="text-xs text-gray-500">Saving to your profile...</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <span className="text-xs text-emerald-600">Uploaded</span>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

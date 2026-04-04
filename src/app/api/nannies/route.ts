@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 export async function GET(req: NextRequest) {
   try {
+    // Rate limiting check (search: 30 req/min per IP)
+    const { success, headers } = await checkRateLimit(req, 'search');
+    if (!success) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const skill = searchParams.get('skill');
     const search = searchParams.get('search');
@@ -54,7 +64,7 @@ export async function GET(req: NextRequest) {
       orderBy: { rating: 'desc' },
     });
 
-    return NextResponse.json({ nannies });
+    return NextResponse.json({ nannies }, { headers });
   } catch (error: any) {
     console.error('List nannies error:', error);
     return NextResponse.json(

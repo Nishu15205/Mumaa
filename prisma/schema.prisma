@@ -29,6 +29,7 @@ model User {
   reviewsReceived Review[] @relation("ReviewTo")
   subscriptions Subscription[]
   notifications Notification[]
+  pushSubscriptions PushSubscription[]
 }
 
 model NannyProfile {
@@ -122,6 +123,17 @@ model Notification {
   message   String
   isRead    Boolean  @default(false)
   data      String?  // JSON string for extra data
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

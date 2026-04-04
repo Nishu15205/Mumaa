@@ -25,6 +25,7 @@ import NannyCalls from '@/components/dashboard/nanny/NannyCalls';
 import NannyEarnings from '@/components/dashboard/nanny/NannyEarnings';
 
 import AdminDashboard from '@/components/dashboard/admin/AdminDashboard';
+import AdminAnalytics from '@/components/dashboard/admin/AdminAnalytics';
 import AdminUsers from '@/components/dashboard/admin/AdminUsers';
 import AdminCalls from '@/components/dashboard/admin/AdminCalls';
 
@@ -91,7 +92,7 @@ function AdminDashboardRouter({ activePage }: { activePage: string }) {
     case 'calls':
       return <AdminCalls />;
     case 'analytics':
-      return <AdminDashboard />;
+      return <AdminAnalytics />;
     default:
       return <AdminDashboard />;
   }
@@ -125,7 +126,7 @@ export default function Home() {
   useEffect(() => {
     if (!user || isLoading) return;
 
-    apiGet(`/api/auth/me?userId=${user.id}`)
+    apiGet<{ user: any; subscription?: any }>(`/api/auth/me?userId=${user.id}`)
       .then((data) => {
         if (data.user) {
           setUser(data.user);
@@ -138,7 +139,7 @@ export default function Home() {
         // Session expired, stay with local data
       });
 
-    apiGet(`/api/notifications?userId=${user.id}`)
+    apiGet<{ notifications: any[] }>(`/api/notifications?userId=${user.id}`)
       .then((data) => {
         if (data.notifications) {
           data.notifications.forEach((n: any) => {

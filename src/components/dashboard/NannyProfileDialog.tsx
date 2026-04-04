@@ -31,7 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { NannyProfile, Review } from '@/types';
 
-interface NannyWithUser extends NannyProfile {
+interface NannyWithUser extends Omit<NannyProfile, 'user'> {
   user?: { id: string; name: string; email: string; avatar: string | null; isOnline: boolean } | null;
 }
 

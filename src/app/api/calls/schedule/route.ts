@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '@/lib/db';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
+    // Rate limiting check (general: 60 req/min per IP)
+    const { success, headers } = await checkRateLimit(req, 'general');
+    if (!success) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers }
+      );
+    }
+
     const body = await req.json();
     const { parentId, nannyId, scheduledAt, notes } = body;
 
@@ -73,7 +83,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       { call, message: 'Call scheduled successfully' },
-      { status: 201 }
+      { status: 201, headers }
     );
   } catch (error: any) {
     console.error('Schedule call error:', error);

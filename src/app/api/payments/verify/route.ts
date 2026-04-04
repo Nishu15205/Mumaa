@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
 import { db } from '@/lib/db';
-import { isStripeConfigured, getStripe, type PlanType, PLAN_LABELS } from '@/lib/stripe';
+import { isStripeConfigured, getStripe } from '@/lib/stripe';
 
-/**
- * GET /api/payments/success?session_id=xxx
- *
- * Handles the redirect after a successful Stripe checkout.
- * Verifies the session and returns subscription details.
- */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -20,9 +15,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ------------------------------------------------------------------
     // Real Stripe verification
-    // ------------------------------------------------------------------
     if (isStripeConfigured) {
       const stripe = getStripe();
       if (!stripe) {
@@ -32,20 +25,19 @@ export async function GET(req: NextRequest) {
         );
       }
 
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ['subscription', 'customer'],
+      });
 
-      if (session.status !== 'complete') {
-        return NextResponse.json(
-          { error: 'Checkout session not completed', sessionStatus: session.status },
-          { status: 400 }
-        );
-      }
+      const sub = session.subscription as Stripe.Subscription | null;
+      const isPaymentComplete =
+        session.payment_status === 'paid' ||
+        session.status === 'complete';
 
-      const plan = (session.metadata?.plan ?? 'BASIC') as PlanType;
+      const plan = session.metadata?.plan ?? 'BASIC';
       const userId = session.metadata?.userId;
 
-      // Find the user's subscription in our DB
-      let dbSubscription: any = null;
+      let dbSubscription: Record<string, unknown> | null = null;
       if (userId) {
         dbSubscription = await db.subscription.findFirst({
           where: { userId },
@@ -55,18 +47,26 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         success: true,
+        sessionId: session.id,
+        paymentStatus: session.payment_status,
+        sessionStatus: session.status,
         plan,
-        sessionId,
+        isPaymentComplete,
         stripeSubscriptionId: session.subscription,
         stripeCustomerId: session.customer,
+        subscriptionStatus: sub?.status ?? null,
+        isTrial: sub?.status === 'trialing',
+        trialEnd: sub?.trial_end
+          ? new Date(sub.trial_end * 1000).toISOString()
+          : null,
+        currentPeriodEnd: sub?.current_period_end
+          ? new Date(sub.current_period_end * 1000).toISOString()
+          : null,
         dbSubscription,
-        message: `Welcome to MUMAA! Your ${PLAN_LABELS[plan]} plan is now active. Enjoy your free trial!`,
       });
     }
 
-    // ------------------------------------------------------------------
     // Mock verification (fallback)
-    // ------------------------------------------------------------------
     const isValid = sessionId.startsWith('cs_mock_');
 
     if (!isValid) {
@@ -80,12 +80,16 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      plan,
       sessionId,
-      message: `Welcome to MUMAA! Your ${plan} plan is now active with mock billing.`,
+      paymentStatus: 'paid',
+      sessionStatus: 'complete',
+      plan,
+      isPaymentComplete: true,
+      isTrial: true,
+      mode: 'mock',
     });
   } catch (error: unknown) {
-    console.error('Payment success verification error:', error);
+    console.error('Payment verify error:', error);
     const message =
       error instanceof Error ? error.message : 'Verification failed';
     return NextResponse.json(
