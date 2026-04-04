@@ -57,16 +57,20 @@ export default function NannyDashboard({ onNavigate }: { onNavigate?: (page: str
       setProfile(profileRes.nanny);
       setRecentCalls((callsRes.calls || []).slice(0, 5));
 
-      // Generate sample weekly earnings data (last 7 days)
+      // Build weekly earnings from actual completed calls (last 7 days)
+      const allCalls = callsRes.calls || [];
+      const completedCalls = allCalls.filter((c) => c.status === 'COMPLETED');
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const weeklyData = [];
+      const weeklyData: { day: string; earnings: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const date = new Date();
         date.setDate(date.getDate() - i);
-        weeklyData.push({
-          day: days[date.getDay()],
-          earnings: Math.round(Math.random() * 800 + 200),
-        });
+        const dayStr = date.toISOString().split('T')[0];
+        const dayLabel = days[date.getDay()];
+        const dayEarnings = completedCalls
+          .filter((c) => c.endedAt && c.endedAt.startsWith(dayStr))
+          .reduce((sum, c) => sum + (c.price || 0), 0);
+        weeklyData.push({ day: dayLabel, earnings: Math.round(dayEarnings) });
       }
       setEarningsData(weeklyData);
     } catch {
