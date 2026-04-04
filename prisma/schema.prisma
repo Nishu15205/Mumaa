@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  password      String
+  role          String   @default("PARENT") // PARENT, NANNY, ADMIN
+  phone         String?
+  avatar        String?
+  bio           String?
+  isOnline      Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  nannyProfile  NannyProfile?
+  parentProfile ParentProfile?
+  parentCalls   CallSession[] @relation("CallParent")
+  nannyCalls    CallSession[] @relation("CallNanny")
+  reviewsGiven  Review[] @relation("ReviewFrom")
+  reviewsReceived Review[] @relation("ReviewTo")
+  subscriptions Subscription[]
+  notifications Notification[]
+}
+
+model NannyProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  experience    Int      @default(0)
+  skills        String   @default("") // comma separated
+  hourlyRate    Float    @default(0)
+  isAvailable   Boolean  @default(false)
+  rating        Float    @default(0)
+  totalSessions Int      @default(0)
+  totalEarnings Float    @default(0)
+  languages     String   @default("")
+  certifications String  @default("")
+  ageGroup      String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ParentProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  childrenCount Int      @default(0)
+  childrenAges  String   @default("")
+  preferences   String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CallSession {
+  id            String   @id @default(cuid())
+  parentId      String
+  nannyId       String
+  type          String   @default("INSTANT") // INSTANT, SCHEDULED
+  status        String   @default("PENDING") // PENDING, ACCEPTED, ACTIVE, COMPLETED, CANCELLED, NO_SHOW
+  scheduledAt   DateTime?
+  startedAt     DateTime?
+  endedAt       DateTime?
+  duration      Int      @default(0) // in seconds
+  price         Float    @default(0)
+  notes         String?
+  callRoomId    String?
+  rating        Float?
+  reviewComment String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  parent        User     @relation("CallParent", fields: [parentId], references: [id])
+  nanny         User     @relation("CallNanny", fields: [nannyId], references: [id])
+  reviews       Review[]
+}
+
+model Subscription {
+  id                String   @id @default(cuid())
+  userId            String
+  plan              String   @default("FREE") // FREE, BASIC, PRO
+  status            String   @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  isTrial           Boolean  @default(false)
+  trialEndsAt       DateTime?
+  currentPeriodEnds DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Review {
+  id            String   @id @default(cuid())
+  callSessionId String
+  fromUserId    String
+  toUserId      String
+  rating        Float
+  comment       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  callSession   CallSession @relation(fields: [callSessionId], references: [id])
+  fromUser      User        @relation("ReviewFrom", fields: [fromUserId], references: [id])
+  toUser        User        @relation("ReviewTo", fields: [toUserId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // CALL_REQUEST, CALL_SCHEDULED, CALL_COMPLETED, SUBSCRIPTION, SYSTEM
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  data      String?  // JSON string for extra data
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
