@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
@@ -37,6 +37,54 @@ import { VideoCallScreen } from '@/components/videocall/VideoCallScreen';
 import { IncomingCallDialog } from '@/components/videocall/IncomingCallDialog';
 import LegalPages from '@/components/common/LegalPages';
 import ApplyAsNanny from '@/components/common/ApplyAsNanny';
+
+// Error boundary to catch video call crashes gracefully
+class VideoCallErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[MUMAA] VideoCall ErrorBoundary caught:', error, errorInfo);
+  }
+  handleReset = () => {
+    const { endCall } = useAppStore.getState();
+    endCall();
+    this.setState({ hasError: false, error: null });
+  };
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 z-[90] bg-gray-950 flex items-center justify-center p-6">
+          <div className="bg-gray-900 rounded-3xl p-8 shadow-2xl border border-gray-800 text-center max-w-md w-full">
+            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Call Error</h2>
+            <p className="text-gray-400 text-sm mb-6">
+              Something went wrong with the video call. This may be due to network restrictions in the current environment.
+            </p>
+            <button
+              onClick={this.handleReset}
+              className="w-full bg-rose-500 hover:bg-rose-600 text-white rounded-xl h-11 font-medium transition-colors"
+            >
+              Go Back to Dashboard
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function LoadingScreen() {
   return (
@@ -230,8 +278,10 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Video Call Overlay - renders on top of everything */}
-      {showVideoCall && <VideoCallScreen />}
+      {/* Video Call Overlay with Error Boundary - renders on top of everything */}
+      <VideoCallErrorBoundary>
+        {showVideoCall && <VideoCallScreen />}
+      </VideoCallErrorBoundary>
 
       {/* Incoming Call Dialog */}
       <IncomingCallDialog call={incomingCall} />

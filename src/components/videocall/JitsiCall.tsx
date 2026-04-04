@@ -71,12 +71,23 @@ export function JitsiCall({
         return
       }
 
+      // Timeout after 15 seconds
+      const timeout = setTimeout(() => {
+        reject(new Error('Video service could not be loaded. Please check your internet connection or try again later.'))
+      }, 15000)
+
       const script = document.createElement('script')
       script.src = getJitsiScriptSrc()
       script.async = true
       script.crossOrigin = 'anonymous'
-      script.onload = () => resolve()
-      script.onerror = () => reject(new Error('Failed to load Jitsi Meet. Please check your internet connection.'))
+      script.onload = () => {
+        clearTimeout(timeout)
+        resolve()
+      }
+      script.onerror = () => {
+        clearTimeout(timeout)
+        reject(new Error('Failed to load Jitsi Meet. Please check your internet connection.'))
+      }
       document.head.appendChild(script)
     })
   }, [])

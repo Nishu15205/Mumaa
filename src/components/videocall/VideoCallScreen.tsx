@@ -80,14 +80,20 @@ export function VideoCallScreen() {
 
   // Handle Jitsi error
   const handleJitsiError = useCallback((error: string) => {
+    console.error('[MUMAA] Jitsi error:', error)
     toast.error('Call Error', {
       description: error,
     })
     // If error is from user cancelling, go back
     if (error === 'User cancelled') {
-      handleBackToDashboard()
+      setCallState('ended')
+      setCallDurationOnEnd(0)
+      setTimeout(() => {
+        endCall()
+        setCallState('connecting')
+      }, 500)
     }
-  }, [handleBackToDashboard])
+  }, [endCall])
 
   // Persist call end to database via API
   const persistCallEnd = useCallback(async (callId: string, durationSeconds: number) => {
