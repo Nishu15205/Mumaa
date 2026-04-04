@@ -150,3 +150,29 @@ Stage Summary:
 - STRIPE: CheckoutDialog, webhook, portal, subscription management, cancel flow ✅
 - PRICING: Fixed to ₹499 Basic / ₹999 Pro with 7-day free trial on all plans
 - 0 lint errors, server stable, preview working
+---
+Task ID: 5
+Agent: Main
+Task: Improve login/signup UX - Add demo accounts, role clarity for Parent & Nanny
+
+Work Log:
+- User asked "nanny kaise login kregi aur parent kaise" - how do nannies/parents login
+- Analyzed full auth flow: Signup (role tabs), Login (email+password, auto-detect role from DB)
+- Updated LoginForm.tsx: Added "Quick Demo Login" collapsible section with 3 one-click demo accounts:
+  - Parent: rahul.mehta@email.com / parent123
+  - Nanny: priya.sharma@email.com / nanny123
+  - Admin: admin@mumaa.in / admin123
+- Updated SignupForm.tsx: Replaced simple tabs with visual role selection cards:
+  - Parent card (emerald) with features list
+  - Nanny card (violet) with features list
+  - Added "As a Parent/Nanny you get:" feature preview
+  - Button text changes to "Create Parent Account" / "Create Nanny Account"
+- Removed separate "Admin Login →" link from LoginForm (admin is now in demo accounts)
+- Tested all 3 login APIs: Parent (PRO plan), Nanny (FREE trial), Admin - all return 200
+
+Stage Summary:
+- Login page now has Quick Demo Login with one-click access to all 3 roles
+- Signup page has visual role selection cards with feature previews
+- Auth flow: New users sign up with role → auto-logged in → onboarding → dashboard
+- Existing users: email + password → auto-redirect to correct dashboard based on DB role
+- All 3 login types verified working via API tests

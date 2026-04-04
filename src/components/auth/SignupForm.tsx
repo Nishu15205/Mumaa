@@ -2,16 +2,46 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Heart, Eye, EyeOff, Loader2, ArrowLeft, X } from 'lucide-react';
+import { Heart, Eye, EyeOff, Loader2, ArrowLeft, X, User, Baby, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import type { AppView } from '@/types';
 import OnboardingFlow from '@/components/onboarding/OnboardingFlow';
+
+const ROLE_INFO = {
+  PARENT: {
+    icon: User,
+    label: "I'm a Parent",
+    tagline: 'Find trusted nannies for your children',
+    color: 'from-emerald-500 to-teal-600',
+    activeBg: 'border-emerald-300 bg-emerald-50',
+    inactiveBg: 'border-gray-200 bg-white hover:border-gray-300',
+    activeText: 'text-emerald-700',
+    features: [
+      'Browse & book verified nannies',
+      'Instant & scheduled video calls',
+      '7-day free trial on signup',
+    ],
+  },
+  NANNY: {
+    icon: Baby,
+    label: "I'm a Nanny",
+    tagline: 'Connect with families & earn income',
+    color: 'from-violet-500 to-purple-600',
+    activeBg: 'border-violet-300 bg-violet-50',
+    inactiveBg: 'border-gray-200 bg-white hover:border-gray-300',
+    activeText: 'text-violet-700',
+    features: [
+      'Create your professional profile',
+      'Set your own availability & rates',
+      'Track earnings & build reputation',
+    ],
+  },
+};
 
 export default function SignupForm() {
   const [role, setRole] = useState<'PARENT' | 'NANNY'>('PARENT');
@@ -149,8 +179,8 @@ export default function SignupForm() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 px-4 py-12">
-      <div className="absolute top-20 -left-20 w-72 h-72 bg-rose-200/30 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-20 -right-20 w-64 h-64 bg-pink-200/25 rounded-full blur-3xl pointer-events-none" />
+      <div className="fixed top-20 -left-20 w-72 h-72 bg-rose-200/30 rounded-full blur-3xl pointer-events-none" />
+      <div className="fixed bottom-20 -right-20 w-64 h-64 bg-pink-200/25 rounded-full blur-3xl pointer-events-none" />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -184,23 +214,48 @@ export default function SignupForm() {
             Join thousands of parents and nannies on Mumaa
           </p>
 
-          {/* Role Tabs */}
-          <Tabs value={role} onValueChange={(v) => setRole(v as 'PARENT' | 'NANNY')} className="mb-6">
-            <TabsList className="w-full grid grid-cols-2 h-12 rounded-xl bg-gray-100 p-1">
-              <TabsTrigger
-                value="PARENT"
-                className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-rose-600 transition-all text-sm font-medium"
-              >
-                I&apos;m a Parent
-              </TabsTrigger>
-              <TabsTrigger
-                value="NANNY"
-                className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-rose-600 transition-all text-sm font-medium"
-              >
-                I&apos;m a Nanny
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          {/* Role Selection Cards */}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            {(['PARENT', 'NANNY'] as const).map((r) => {
+              const info = ROLE_INFO[r];
+              const Icon = info.icon;
+              const isActive = role === r;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRole(r)}
+                  className={`relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 ${isActive ? info.activeBg : info.inactiveBg}`}
+                >
+                  {isActive && (
+                    <div className="absolute top-2 right-2">
+                      <CheckCircle className={`w-4 h-4 ${info.activeText}`} />
+                    </div>
+                  )}
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${info.color} flex items-center justify-center`}>
+                    <Icon className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-center">
+                    <p className={`text-sm font-semibold ${isActive ? info.activeText : 'text-gray-700'}`}>{info.label}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">{info.tagline}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Role Features Info */}
+          <div className="mb-5 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-100">
+            <p className="text-[11px] text-gray-500 font-medium mb-1.5">As a {role === 'PARENT' ? 'Parent' : 'Nanny'} you get:</p>
+            <ul className="space-y-1">
+              {ROLE_INFO[role].features.map((f, i) => (
+                <li key={i} className="text-[11px] text-gray-600 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-rose-400 flex-shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+          </div>
 
           {/* Error */}
           {error && (
@@ -435,7 +490,7 @@ export default function SignupForm() {
                   Creating account...
                 </>
               ) : (
-                'Create Account'
+                `Create ${role === 'PARENT' ? 'Parent' : 'Nanny'} Account`
               )}
             </Button>
           </form>
