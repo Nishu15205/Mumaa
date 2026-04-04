@@ -4,35 +4,30 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   PhoneOff,
+  Mic,
+  MicOff,
   MessageSquare,
   ArrowLeft,
-  Check,
-  Video,
-  Users,
   Clock,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAppStore } from '@/stores/app-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { CallTimer } from './CallTimer'
-import { VideoPlaceholder } from './VideoPlaceholder'
 import { ChatPanel } from './ChatPanel'
 import { StarRating } from '@/components/common/StarRating'
-import { JitsiCall } from './JitsiCall'
-import type { JitsiCallHandle } from './JitsiCall'
-import { generateRoomName } from '@/lib/jitsi'
+import { WebRTCCall } from './WebRTCCall'
 
 type CallState = 'waiting' | 'connecting' | 'active' | 'ended'
 
-const WAIT_TIMEOUT_SECONDS = 5 * 60 // 5 minutes
+const WAIT_TIMEOUT_SECONDS = 5 * 60
 
 export function VideoCallScreen() {
   const { currentCall, endCall, waitingForNanny, setWaitingForNanny } = useAppStore()
-  const { user } = useAuthStore()
+  const { user, isAuthenticated } = useAuthStore()
 
   const [callState, setCallState] = useState<CallState>(() =>
     waitingForNanny ? 'waiting' : 'connecting'
@@ -44,20 +39,15 @@ export function VideoCallScreen() {
   const [isReviewSubmitting, setIsReviewSubmitting] = useState(false)
   const [otherPersonName, setOtherPersonName] = useState('')
   const [otherPersonId, setOtherPersonId] = useState('')
-  const [participantCount, setParticipantCount] = useState(1)
   const [callDurationOnEnd, setCallDurationOnEnd] = useState(0)
-  const [jitsiReady, setJitsiReady] = useState(false)
-
-  // Waiting countdown
   const [waitSecondsLeft, setWaitSecondsLeft] = useState(WAIT_TIMEOUT_SECONDS)
 
-  // Ref for JitsiCall component
-  const jitsiRef = useRef<JitsiCallHandle>(null)
+  // Socket ref for WebRTC signaling
+  const socketRef = useRef<any>(null)
 
   // Determine other participant info
   useEffect(() => {
     if (!currentCall || !user) return
-
     if (user.role === 'PARENT') {
       setOtherPersonName(currentCall.nannyName || 'Nanny')
       setOtherPersonId(currentCall.nannyId)
@@ -67,44 +57,74 @@ export function VideoCallScreen() {
     }
   }, [currentCall, user])
 
-  // 5-minute countdown timer for waiting state
+  // Get or create socket connection for WebRTC signaling
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id || !user?.role) return
+    let disconnected = false
+
+    const initSocket = async () => {
+      try {
+        const { io } = await import('socket.io-client')
+        if (disconnected) return
+
+        const socket = io('/?XTransformPort=3003', {
+          path: '/socket.io',
+          transports: ['websocket', 'polling'],
+          reconnection: true,
+          reconnectionAttempts: 5,
+        })
+
+        socket.on('connect', () => {
+          socket.emit('auth', { userId: user.id, role: user.role })
+        })
+
+        socketRef.current = socket
+      } catch {
+        // Socket not available
+      }
+    }
+
+    initSocket()
+
+    return () => {
+      disconnected = true
+      if (socketRef.current) {
+        socketRef.current.disconnect()
+        socketRef.current = null
+      }
+    }
+  }, [isAuthenticated, user?.id, user?.role])
+
+  // 5-minute countdown for waiting
   useEffect(() => {
     if (callState !== 'waiting') return
-
     const interval = setInterval(() => {
       setWaitSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval)
-          // Auto-cancel after 5 minutes
           handleCancelWait()
           return 0
         }
         return prev - 1
       })
     }, 1000)
-
     return () => clearInterval(interval)
   }, [callState])
 
-  // Listen for nanny accepting the call (via socket events in page.tsx)
+  // Poll for nanny acceptance
   useEffect(() => {
     if (callState !== 'waiting') return
-
     const interval = setInterval(() => {
       const store = useAppStore.getState()
-      // If waitingForNanny is set to false externally (by socket handler), transition
       if (!store.waitingForNanny && store.currentCall) {
         setWaitingForNanny(false)
         setCallState('connecting')
-        toast.success(`${otherPersonName} joined the call!`)
       }
     }, 300)
-
     return () => clearInterval(interval)
-  }, [callState, otherPersonName, setWaitingForNanny])
+  }, [callState, setWaitingForNanny])
 
   const handleCancelWait = useCallback(() => {
-    // Cancel the call request
     if (currentCall) {
       fetch(`/api/calls/${currentCall.id}/status`, {
         method: 'PUT',
@@ -114,49 +134,32 @@ export function VideoCallScreen() {
     }
     setWaitingForNanny(false)
     endCall()
-    setCallState('waiting')
-    toast.info('Call cancelled', {
-      description: 'The nanny didn\'t join in time.',
-    })
+    toast.info('Call cancelled')
   }, [currentCall, endCall, setWaitingForNanny])
 
-  // When Jitsi meeting is ready, transition to active state
-  const handleMeetingReady = useCallback(() => {
-    setJitsiReady(true)
+  // WebRTC connected
+  const handleConnected = useCallback(() => {
     setCallState('active')
     setCallStartTime(new Date())
+    toast.success('Connected')
   }, [])
 
-  // Handle Jitsi call end
-  const handleJitsiCallEnd = useCallback((durationSeconds: number) => {
-    setJitsiReady(false)
-    setCallDurationOnEnd(durationSeconds)
+  // WebRTC disconnected
+  const handleDisconnected = useCallback((duration: number) => {
+    setCallDurationOnEnd(duration)
     setCallState('ended')
     setIsChatOpen(false)
-
     if (currentCall) {
-      persistCallEnd(currentCall.id, durationSeconds)
+      persistCallEnd(currentCall.id, duration)
     }
   }, [currentCall])
 
-  // Handle Jitsi error
-  const handleJitsiError = useCallback((error: string) => {
-    console.error('[MUMAA] Jitsi error:', error)
-    toast.error('Call Error', {
-      description: error,
-    })
-    if (error === 'User cancelled') {
-      setJitsiReady(false)
-      setCallState('ended')
-      setCallDurationOnEnd(0)
-      setTimeout(() => {
-        endCall()
-        setCallState('waiting')
-      }, 500)
-    }
-  }, [endCall])
+  // WebRTC error
+  const handleError = useCallback((message: string) => {
+    toast.error('Call Error', { description: message })
+  }, [])
 
-  // Persist call end to database
+  // Persist call end
   const persistCallEnd = useCallback(async (callId: string, durationSeconds: number) => {
     try {
       await fetch(`/api/calls/${callId}/end`, {
@@ -170,26 +173,18 @@ export function VideoCallScreen() {
   }, [])
 
   const handleEndCall = useCallback(() => {
-    if (jitsiRef.current) {
-      jitsiRef.current.endCall()
-    } else {
-      setJitsiReady(false)
-      const duration = callStartTime
-        ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
-        : 0
+    if (callStartTime) {
+      const duration = Math.floor((Date.now() - callStartTime.getTime()) / 1000)
+      persistCallEnd(currentCall?.id || '', duration)
       setCallDurationOnEnd(duration)
-      setCallState('ended')
-      setIsChatOpen(false)
-      if (currentCall) {
-        persistCallEnd(currentCall.id, duration)
-      }
     }
+    setCallState('ended')
+    setIsChatOpen(false)
   }, [callStartTime, currentCall, persistCallEnd])
 
   const handleSubmitReview = useCallback(async () => {
     if (!rating || !currentCall || !user) return
     setIsReviewSubmitting(true)
-
     try {
       const response = await fetch(`/api/calls/${currentCall.id}/review`, {
         method: 'POST',
@@ -201,16 +196,10 @@ export function VideoCallScreen() {
           comment: reviewComment || null,
         }),
       })
-
       if (response.ok) {
         toast.success('Review Submitted')
         setRating(0)
         setReviewComment('')
-      } else {
-        const data = await response.json()
-        toast.error('Review Failed', {
-          description: data.error || 'Could not submit review',
-        })
       }
     } catch {
       toast.error('Review Failed')
@@ -226,8 +215,6 @@ export function VideoCallScreen() {
     setReviewComment('')
     setCallStartTime(null)
     setCallDurationOnEnd(0)
-    setParticipantCount(1)
-    setJitsiReady(false)
     setWaitSecondsLeft(WAIT_TIMEOUT_SECONDS)
     setWaitingForNanny(false)
   }, [endCall, setWaitingForNanny])
@@ -235,24 +222,15 @@ export function VideoCallScreen() {
   // Don't render if no active call
   if (!currentCall) return null
 
-  const roomName = currentCall.callRoomId
-    ? (currentCall.callRoomId.startsWith('mumaa-')
-        ? currentCall.callRoomId
-        : generateRoomName(currentCall.callRoomId))
-    : generateRoomName(currentCall.id)
-
-  const endedDuration = callDurationOnEnd || (callStartTime
-    ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
-    : 0)
-  const endedMinutes = Math.floor(endedDuration / 60)
-  const endedSeconds = endedDuration % 60
-
-  // Format wait countdown
+  const endedMinutes = Math.floor(callDurationOnEnd / 60)
+  const endedSeconds = callDurationOnEnd % 60
   const waitMinutes = Math.floor(waitSecondsLeft / 60)
-  const waitSeconds = waitSecondsLeft % 60
+  const waitSecs = waitSecondsLeft % 60
 
-  const displayName = user?.name || 'MUMAA User'
   const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+
+  const isCaller = user?.role === 'PARENT'
+  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketRef.current
 
   return (
     <motion.div
@@ -262,7 +240,7 @@ export function VideoCallScreen() {
       className="fixed inset-0 z-[90] bg-gray-950 flex flex-col"
     >
       {/* ============================================================
-          WAITING STATE — Clean waiting screen with 5-min countdown
+          WAITING STATE
           ============================================================ */}
       <AnimatePresence>
         {callState === 'waiting' && (
@@ -274,36 +252,24 @@ export function VideoCallScreen() {
             className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950 p-4"
           >
             <div className="text-center">
-              {/* Nanny avatar */}
               <motion.div
                 className="relative inline-block mb-6"
                 animate={{ scale: [1, 1.05, 1] }}
                 transition={{ duration: 2, repeat: Infinity }}
               >
                 <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto">
-                  <span className="text-3xl font-bold text-white">
-                    {getInitials(otherPersonName)}
-                  </span>
+                  <span className="text-3xl font-bold text-white">{getInitials(otherPersonName)}</span>
                 </div>
-                {/* Pulsing ring */}
                 <span className="absolute inset-0 rounded-full border-4 border-emerald-400/30 animate-ping" />
               </motion.div>
-
-              {/* Nanny name */}
               <h2 className="text-2xl font-bold text-white mb-1">{otherPersonName}</h2>
-
-              {/* Waiting status */}
               <p className="text-gray-400 text-sm mb-6">Waiting for nanny to join...</p>
-
-              {/* Countdown timer */}
               <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-sm mb-8">
                 <Clock className="w-4 h-4 text-amber-400" />
                 <span className="text-lg font-mono text-white font-medium">
-                  {String(waitMinutes).padStart(2, '0')}:{String(waitSeconds).padStart(2, '0')}
+                  {String(waitMinutes).padStart(2, '0')}:{String(waitSecs).padStart(2, '0')}
                 </span>
               </div>
-
-              {/* Cancel button */}
               <div>
                 <Button
                   onClick={handleCancelWait}
@@ -320,77 +286,28 @@ export function VideoCallScreen() {
       </AnimatePresence>
 
       {/* ============================================================
-          JitsiCall — ONLY rendered when connecting or active
+          CONNECTING & ACTIVE — Native WebRTC Video
           ============================================================ */}
-      {callState !== 'waiting' && callState !== 'ended' && (
-        <JitsiCall
-          ref={jitsiRef}
-          roomName={roomName}
-          userName={displayName}
-          userEmail={user?.email || undefined}
-          userAvatar={user?.avatar || undefined}
-          onCallEnd={handleJitsiCallEnd}
-          onError={handleJitsiError}
-          onParticipantsChange={setParticipantCount}
-          onMeetingReady={handleMeetingReady}
+      {isWebRTCReady && (
+        <WebRTCCall
+          callId={currentCall.id}
+          otherUserId={otherPersonId}
+          otherPersonName={otherPersonName}
+          isCaller={isCaller}
+          socketRef={socketRef}
+          onConnected={handleConnected}
+          onDisconnected={handleDisconnected}
+          onError={handleError}
         />
       )}
 
       {/* ============================================================
-          CONNECTING — Minimal overlay
+          Active call — Controls overlay
           ============================================================ */}
       <AnimatePresence>
-        {callState === 'connecting' && !jitsiReady && (
-          <motion.div
-            key="connecting"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none"
-          >
-            <div className="absolute bottom-8 pointer-events-auto">
-              <Button
-                onClick={handleBackToDashboard}
-                variant="outline"
-                className="bg-white/10 text-white border-white/20 hover:bg-white/20 rounded-full px-6"
-              >
-                <PhoneOff className="w-4 h-4 mr-2" />
-                Cancel
-              </Button>
-            </div>
-
-            <VideoPlaceholder name={otherPersonName} size="full" />
-
-            {/* Pulse ring */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <motion.div
-                animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0, 0.4] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="w-32 h-32 rounded-full border-2 border-white/20"
-              />
-            </div>
-
-            {/* Connecting text — minimal */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <motion.div
-                animate={{ opacity: [0.6, 1, 0.6] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-                className="text-white text-xl font-medium"
-              >
-                Connecting...
-              </motion.div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ============================================================
-          ACTIVE — Top bar + bottom controls + chat
-          ============================================================ */}
-      <AnimatePresence>
-        {callState === 'active' && jitsiReady && (
+        {callState === 'active' && (
           <>
-            {/* Top Bar */}
+            {/* Top bar with timer */}
             <motion.div
               key="topbar"
               initial={{ opacity: 0, y: -20 }}
@@ -402,16 +319,10 @@ export function VideoCallScreen() {
                 {callStartTime && (
                   <CallTimer startTime={callStartTime} isRunning={true} />
                 )}
-                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur-sm">
-                  <Users className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-[11px] font-medium text-emerald-400">
-                    {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
-                  </span>
-                </div>
               </div>
             </motion.div>
 
-            {/* Bottom Controls */}
+            {/* Bottom controls */}
             <motion.div
               key="bottombar"
               initial={{ opacity: 0, y: 20 }}
@@ -420,7 +331,6 @@ export function VideoCallScreen() {
               className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-12 bg-gradient-to-t from-black/70 to-transparent"
             >
               <div className="flex items-center gap-3 sm:gap-4">
-                {/* Chat toggle */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setIsChatOpen(!isChatOpen)}
@@ -429,41 +339,31 @@ export function VideoCallScreen() {
                       ? 'bg-rose-500 text-white'
                       : 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm'
                   }`}
-                  title="Chat"
                 >
                   <MessageSquare className="w-5 h-5" />
                 </motion.button>
 
-                {/* End Call */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
                   onClick={handleEndCall}
                   className="w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center shadow-lg shadow-red-500/30 transition-colors"
-                  title="End Call"
                 >
                   <PhoneOff className="w-7 h-7 text-white" />
                 </motion.button>
 
-                {/* Toggle video */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
                   onClick={() => {
-                    try {
-                      const container = document.querySelector('[data-jitsi-container]')
-                      if (container) {
-                        const iframe = container.querySelector('iframe')
-                        if (iframe?.contentWindow) {
-                          iframe.contentWindow.postMessage({ type: 'toggle-camera' }, '*')
-                        }
-                      }
-                    } catch {
-                      // Ignore
+                    // Toggle audio via WebRTC component
+                    const container = document.querySelector('[data-webrtc-container]')
+                    if (container) {
+                      const btn = container.querySelector('[data-action="toggle-audio"]') as HTMLElement
+                      btn?.click()
                     }
                   }}
                   className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm flex items-center justify-center transition-colors"
-                  title="Camera"
                 >
-                  <Video className="w-5 h-5" />
+                  <Mic className="w-5 h-5" />
                 </motion.button>
               </div>
             </motion.div>
@@ -497,14 +397,13 @@ export function VideoCallScreen() {
               transition={{ delay: 0.1 }}
               className="w-full max-w-md bg-gray-900 rounded-3xl p-8 shadow-2xl border border-gray-800"
             >
-              {/* Summary */}
               <div className="text-center mb-6">
                 <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-4">
                   <PhoneOff className="w-7 h-7 text-red-400" />
                 </div>
                 <h2 className="text-xl font-bold text-white mb-1">Call Ended</h2>
                 <p className="text-gray-400 text-sm">{otherPersonName}</p>
-                {endedDuration > 0 && (
+                {callDurationOnEnd > 0 && (
                   <div className="mt-2 inline-flex items-center gap-2 px-4 py-1 rounded-full bg-gray-800">
                     <span className="text-sm text-gray-300 font-mono">
                       {String(endedMinutes).padStart(2, '0')}:{String(endedSeconds).padStart(2, '0')}
@@ -515,7 +414,6 @@ export function VideoCallScreen() {
 
               <div className="border-t border-gray-800 mb-5" />
 
-              {/* Rate */}
               <div className="text-center mb-4">
                 <p className="text-sm text-gray-400 mb-3">Rate this call</p>
                 <div className="flex justify-center">

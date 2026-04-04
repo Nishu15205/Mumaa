@@ -323,6 +323,41 @@ io.on('connection', (socket) => {
     }
   })
 
+  // ─── WebRTC Signaling: relay offers, answers, and ICE candidates ───────
+
+  socket.on('webrtc-offer', (payload: { callId: string; toUserId: string; sdp: any }) => {
+    const { callId, toUserId, sdp } = payload
+    const fromUserId = socket.data.userId
+    if (!fromUserId) return
+    log(socket, 'webrtc-offer', { callId, to: toUserId })
+    const target = getSocketByUserId(toUserId)
+    if (target) {
+      target.emit('webrtc-offer', { callId, fromUserId, sdp })
+    }
+  })
+
+  socket.on('webrtc-answer', (payload: { callId: string; toUserId: string; sdp: any }) => {
+    const { callId, toUserId, sdp } = payload
+    const fromUserId = socket.data.userId
+    if (!fromUserId) return
+    log(socket, 'webrtc-answer', { callId, to: toUserId })
+    const target = getSocketByUserId(toUserId)
+    if (target) {
+      target.emit('webrtc-answer', { callId, fromUserId, sdp })
+    }
+  })
+
+  socket.on('webrtc-ice-candidate', (payload: { callId: string; toUserId: string; candidate: any }) => {
+    const { callId, toUserId, candidate } = payload
+    const fromUserId = socket.data.userId
+    if (!fromUserId) return
+    // Don't log every ICE candidate (too noisy)
+    const target = getSocketByUserId(toUserId)
+    if (target) {
+      target.emit('webrtc-ice-candidate', { callId, fromUserId, candidate })
+    }
+  })
+
   // ─── Disconnect ─────────────────────────────────────────────────────────
 
   socket.on('disconnect', (reason) => {
