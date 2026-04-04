@@ -227,13 +227,16 @@ export default function Home() {
 
   // Socket.IO for real-time features
   useEffect(() => {
-    if (!isAuthenticated || !user) return;
+    if (!isAuthenticated || !user?.id || !user?.role) return;
 
     let socket: any = null;
+    let disconnected = false;
 
     const initSocket = async () => {
       try {
         const { io } = await import('socket.io-client');
+        if (disconnected) return;
+
         socket = io('/?XTransformPort=3003', {
           path: '/socket.io',
           transports: ['websocket', 'polling'],
@@ -258,12 +261,16 @@ export default function Home() {
         });
 
         socket.on('call-accepted', (data: any) => {
-          // When the other party accepts, if parent is in connecting state,
-          // transition to active (Jitsi handles the actual connection)
           const store = useAppStore.getState();
           if (store.currentCall && store.currentCall.id === data.callId) {
-            // The call is accepted — Jitsi will detect the other participant joining
-            // No action needed here, Jitsi handles it automatically via room
+            // The other party accepted — Jitsi detects the participant joining automatically
+            // Just show a toast so the user knows
+            const otherName = user.role === 'PARENT'
+              ? (store.currentCall.nannyName || 'Nanny')
+              : (store.currentCall.parentName || 'Parent');
+            toast.success('Call Accepted', {
+              description: `${otherName} has joined the call.`,
+            });
           }
         });
 
@@ -281,6 +288,9 @@ export default function Home() {
           const store = useAppStore.getState();
           if (store.currentCall && (!data?.callId || store.currentCall.id === data.callId)) {
             store.endCall();
+            toast.info('Call Ended', {
+              description: 'The other person has ended the call.',
+            });
           }
         });
 
@@ -295,9 +305,10 @@ export default function Home() {
     initSocket();
 
     return () => {
+      disconnected = true;
       if (socket) socket.disconnect();
     };
-  }, [isAuthenticated, user?.id]);
+  }, [isAuthenticated, user?.id, user?.role]);
 
   if (!mounted) {
     return <LoadingScreen />;

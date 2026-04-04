@@ -49,25 +49,31 @@ export async function PUT(
     let notificationType = 'CALL_REQUEST';
     let parentMessage = '';
     let nannyMessage = '';
+    let socketEvent: string | null = null;
 
     if (status === 'ACCEPTED') {
       notificationType = 'CALL_REQUEST';
       parentMessage = `${updatedCall.nanny.name} has accepted your call request.`;
       nannyMessage = `You have accepted the call request from ${updatedCall.parent.name}.`;
+      socketEvent = 'call-accepted';
     } else if (status === 'ACTIVE') {
       notificationType = 'CALL_REQUEST';
       parentMessage = `Your call with ${updatedCall.nanny.name} is now active.`;
       nannyMessage = `Your call with ${updatedCall.parent.name} is now active.`;
+      socketEvent = 'call-accepted';
     } else if (status === 'CANCELLED') {
       notificationType = 'CALL_REQUEST';
       parentMessage = `The call with ${updatedCall.nanny.name} has been cancelled.`;
       nannyMessage = `The call with ${updatedCall.parent.name} has been cancelled.`;
+      socketEvent = 'call-rejected';
     } else if (status === 'COMPLETED') {
       notificationType = 'CALL_COMPLETED';
       parentMessage = `Your call with ${updatedCall.nanny.name} has been completed.`;
       nannyMessage = `Your call with ${updatedCall.parent.name} has been completed.`;
+      socketEvent = 'call-ended';
     }
 
+    // Create DB notifications
     await db.notification.createMany({
       data: [
         {
@@ -86,6 +92,82 @@ export async function PUT(
         },
       ],
     });
+
+    // Push real-time socket event to both parties
+    if (socketEvent) {
+      try {
+        const SOCKET_PORT = process.env.SOCKET_PORT || 3003;
+        const socketBase = `http://localhost:${SOCKET_PORT}/emit`;
+
+        // Determine who triggered the action (parent or nanny)
+        // We notify the OTHER party about the status change
+        const notifyParent = status === 'ACCEPTED' || status === 'CANCELLED';
+        const notifyNanny = status === 'ACTIVE';
+
+        // Always notify both parties for real-time sync
+        const parentSocketData = {
+          callId: id,
+          event: socketEvent,
+          data: {
+            callId: id,
+            ...(socketEvent === 'call-accepted' ? {
+              accepterId: updatedCall.nannyId,
+              roomName: updatedCall.callRoomId,
+            } : {}),
+            ...(socketEvent === 'call-rejected' ? {
+              rejecterId: updatedCall.nannyId,
+            } : {}),
+            ...(socketEvent === 'call-ended' ? {
+              enderId: updatedCall.parentId,
+              reason: 'status_update',
+            } : {}),
+          },
+        };
+
+        const nannySocketData = {
+          callId: id,
+          event: socketEvent,
+          data: {
+            callId: id,
+            ...(socketEvent === 'call-accepted' ? {
+              accepterId: updatedCall.parentId,
+              roomName: updatedCall.callRoomId,
+            } : {}),
+            ...(socketEvent === 'call-rejected' ? {
+              rejecterId: updatedCall.parentId,
+            } : {}),
+            ...(socketEvent === 'call-ended' ? {
+              enderId: updatedCall.nannyId,
+              reason: 'status_update',
+            } : {}),
+          },
+        };
+
+        // Notify parent
+        await fetch(socketBase, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toUserId: updatedCall.parentId,
+            event: socketEvent,
+            data: parentSocketData.data,
+          }),
+        }).catch(() => {});
+
+        // Notify nanny
+        await fetch(socketBase, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            toUserId: updatedCall.nannyId,
+            event: socketEvent,
+            data: nannySocketData.data,
+          }),
+        }).catch(() => {});
+      } catch (socketErr) {
+        console.warn('[Call Status] Socket notification failed:', socketErr);
+      }
+    }
 
     return NextResponse.json({
       call: updatedCall,

@@ -31,6 +31,20 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       // Non-critical: continue even if status update fails
     }
 
+    // Notify caller via socket that we accepted
+    try {
+      const { io } = await import('socket.io-client')
+      const socket = io('/?XTransformPort=3003', { path: '/socket.io' })
+      socket.emit('call-accepted', {
+        callId: call.callId,
+        toUserId: call.callerId,
+        roomName: call.callRoomId || null,
+      })
+      setTimeout(() => socket.disconnect(), 1000)
+    } catch {
+      // Non-critical: socket notification failed
+    }
+
     // Build the correct room name — use the real callRoomId from the socket event
     const roomName = call.callRoomId || `mumaa-${call.callId}`
 
@@ -41,8 +55,8 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       nannyId: user.role === 'NANNY' ? user.id : call.callerId,
       parentName: user.role === 'PARENT' ? user.name : call.callerName,
       nannyName: user.role === 'NANNY' ? user.name : call.callerName,
-      parentAvatar: user.role === 'PARENT' ? user.avatar : null,
-      nannyAvatar: user.role === 'NANNY' ? user.avatar : null,
+      parentAvatar: user.role === 'PARENT' ? (user.avatar || null) : call.callerAvatar,
+      nannyAvatar: user.role === 'NANNY' ? (user.avatar || null) : call.callerAvatar,
       type: call.type,
       status: 'ACCEPTED',
       scheduledAt: null,
@@ -72,6 +86,19 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       // Non-critical
     }
 
+    // Notify caller via socket that we declined
+    try {
+      const { io } = await import('socket.io-client')
+      const socket = io('/?XTransformPort=3003', { path: '/socket.io' })
+      socket.emit('call-rejected', {
+        callId: call.callId,
+        toUserId: call.callerId,
+      })
+      setTimeout(() => socket.disconnect(), 1000)
+    } catch {
+      // Non-critical
+    }
+
     setIncomingCall(null)
     toast.info('Call declined')
   }, [call, setIncomingCall])
@@ -86,6 +113,17 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       remaining -= 1
       if (remaining <= 0) {
         clearInterval(timer)
+
+        // Auto-decline: update status and notify caller
+        if (call.callId && call.callerId) {
+          apiPut(`/api/calls/${call.callId}/status`, { status: 'CANCELLED' }).catch(() => {})
+          import('socket.io-client').then(({ io }) => {
+            const socket = io('/?XTransformPort=3003', { path: '/socket.io' })
+            socket.emit('call-rejected', { callId: call.callId, toUserId: call.callerId })
+            setTimeout(() => socket.disconnect(), 1000)
+          }).catch(() => {})
+        }
+
         setIncomingCall(null)
         return
       }

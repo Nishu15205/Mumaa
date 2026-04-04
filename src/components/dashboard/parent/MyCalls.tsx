@@ -25,6 +25,36 @@ import ReviewDialog from '@/components/dashboard/ReviewDialog';
 import type { CallSession } from '@/types';
 import { CALL_STATUS_LABELS } from '@/lib/constants';
 
+/**
+ * Safely flatten a nested call from the API into a flat CallSession.
+ * API returns: { parent: { name, avatar }, nanny: { name, avatar }, ... }
+ * We need:     { parentName, parentAvatar, nannyName, nannyAvatar, ... }
+ */
+function flattenCall(raw: any): CallSession {
+  return {
+    id: raw.id,
+    parentId: raw.parentId,
+    nannyId: raw.nannyId,
+    parentName: raw.parent?.name || raw.parentName || 'Parent',
+    nannyName: raw.nanny?.name || raw.nannyName || 'Nanny',
+    parentAvatar: raw.parent?.avatar || raw.parentAvatar || null,
+    nannyAvatar: raw.nanny?.avatar || raw.nannyAvatar || null,
+    type: raw.type,
+    status: raw.status,
+    scheduledAt: raw.scheduledAt,
+    startedAt: raw.startedAt,
+    endedAt: raw.endedAt,
+    duration: raw.duration || 0,
+    price: raw.price || 0,
+    notes: raw.notes,
+    callRoomId: raw.callRoomId,
+    rating: raw.rating,
+    reviewComment: raw.reviewComment,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+  };
+}
+
 export default function MyCalls({ onReview }: { onReview?: (call: CallSession) => void }) {
   const { user } = useAuthStore();
   const { startCall } = useAppStore();
@@ -43,8 +73,10 @@ export default function MyCalls({ onReview }: { onReview?: (call: CallSession) =
     if (!user?.id) return;
     try {
       setLoading(true);
-      const res = await apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=100`);
-      setAllCalls((res.calls || []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      const res = await apiGet<{ calls: any[] }>(`/api/calls?userId=${user.id}&limit=100`);
+      // Flatten nested API data into flat CallSession objects
+      const flatCalls = (res.calls || []).map(flattenCall);
+      setAllCalls(flatCalls.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       // empty
     } finally {

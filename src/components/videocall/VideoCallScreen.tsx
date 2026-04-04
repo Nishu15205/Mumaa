@@ -21,6 +21,7 @@ import { VideoPlaceholder } from './VideoPlaceholder'
 import { ChatPanel } from './ChatPanel'
 import { StarRating } from '@/components/common/StarRating'
 import { JitsiCall } from './JitsiCall'
+import type { JitsiCallHandle } from './JitsiCall'
 import { generateRoomName } from '@/lib/jitsi'
 
 type CallState = 'connecting' | 'active' | 'ended'
@@ -40,9 +41,10 @@ export function VideoCallScreen() {
   const [otherPersonId, setOtherPersonId] = useState('')
   const [participantCount, setParticipantCount] = useState(1)
   const [callDurationOnEnd, setCallDurationOnEnd] = useState(0)
+  const [jitsiReady, setJitsiReady] = useState(false)
 
-  // Ref to hold the Jitsi container for end call access
-  const jitsiContainerRef = useRef<HTMLDivElement>(null)
+  // Ref for JitsiCall component
+  const jitsiRef = useRef<JitsiCallHandle>(null)
 
   // Determine other participant info
   useEffect(() => {
@@ -59,6 +61,7 @@ export function VideoCallScreen() {
 
   // When Jitsi meeting is ready, transition to active state
   const handleMeetingReady = useCallback(() => {
+    setJitsiReady(true)
     setCallState('active')
     setCallStartTime(new Date())
     toast.success('Connected', {
@@ -68,6 +71,7 @@ export function VideoCallScreen() {
 
   // Handle Jitsi call end
   const handleJitsiCallEnd = useCallback((durationSeconds: number) => {
+    setJitsiReady(false)
     setCallDurationOnEnd(durationSeconds)
     setCallState('ended')
     setIsChatOpen(false)
@@ -86,6 +90,7 @@ export function VideoCallScreen() {
     })
     // If error is from user cancelling, go back
     if (error === 'User cancelled') {
+      setJitsiReady(false)
       setCallState('ended')
       setCallDurationOnEnd(0)
       setTimeout(() => {
@@ -112,36 +117,21 @@ export function VideoCallScreen() {
     }
   }, [])
 
-  // Simulate call connection (short delay before Jitsi loads)
-  // Actually Jitsi handles this itself, but we show our connecting state
-  // until Jitsi reports meeting ready
-  useEffect(() => {
-    if (!currentCall) return
-    // The connecting state will be replaced by Jitsi's loading UI
-    // and then the meeting ready callback will transition to active
-  }, [currentCall])
-
   const handleEndCall = useCallback(() => {
-    // Try to find the Jitsi container's endCall method
-    const container = document.getElementById('mumaa-jitsi-container')
-    if (container && (container as HTMLDivElement & { _mumaaEndCall?: () => void })._mumaaEndCall) {
-      ;(container as HTMLDivElement & { _mumaaEndCall?: () => void })._mumaaEndCall!()
+    // Use the ref to call Jitsi's endCall
+    if (jitsiRef.current) {
+      jitsiRef.current.endCall()
     } else {
       // Fallback: just transition to ended state
-      setCallDurationOnEnd(
-        callStartTime
-          ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
-          : 0
-      )
+      setJitsiReady(false)
+      const duration = callStartTime
+        ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
+        : 0
+      setCallDurationOnEnd(duration)
       setCallState('ended')
       setIsChatOpen(false)
       if (currentCall) {
-        persistCallEnd(
-          currentCall.id,
-          callStartTime
-            ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
-            : 0
-        )
+        persistCallEnd(currentCall.id, duration)
       }
     }
   }, [callStartTime, currentCall, persistCallEnd])
@@ -191,6 +181,7 @@ export function VideoCallScreen() {
     setCallStartTime(null)
     setCallDurationOnEnd(0)
     setParticipantCount(1)
+    setJitsiReady(false)
   }, [endCall])
 
   const copyRoomId = useCallback(() => {
@@ -232,16 +223,50 @@ export function VideoCallScreen() {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[90] bg-gray-950 flex flex-col"
     >
-      <AnimatePresence mode="wait">
-        {/* ========== CONNECTING STATE ========== */}
-        {callState === 'connecting' && (
+      {/* ============================================================
+          JitsiCall is ALWAYS rendered (connecting + active states).
+          It loads in the background and fires onMeetingReady when
+          the Jitsi room is joined. The connecting UI is shown as an
+          overlay on top until Jitsi is ready.
+          ============================================================ */}
+      {callState !== 'ended' && (
+        <JitsiCall
+          ref={jitsiRef}
+          roomName={roomName}
+          userName={displayName}
+          userEmail={user?.email || undefined}
+          userAvatar={user?.avatar || undefined}
+          onCallEnd={handleJitsiCallEnd}
+          onError={handleJitsiError}
+          onParticipantsChange={setParticipantCount}
+          onMeetingReady={handleMeetingReady}
+        />
+      )}
+
+      {/* ============================================================
+          Connecting overlay - shown on top of JitsiCall while it loads
+          ============================================================ */}
+      <AnimatePresence>
+        {callState === 'connecting' && !jitsiReady && (
           <motion.div
             key="connecting"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col items-center justify-center relative"
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none"
           >
+            {/* Only the Cancel button is interactive */}
+            <div className="absolute bottom-8 pointer-events-auto">
+              <Button
+                onClick={handleBackToDashboard}
+                variant="outline"
+                className="bg-white/10 text-white border-white/20 hover:bg-white/20 rounded-full px-6"
+              >
+                <PhoneOff className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+
             <VideoPlaceholder name={otherPersonName} size="full" />
 
             {/* Pulse overlay */}
@@ -254,7 +279,7 @@ export function VideoCallScreen() {
             </div>
 
             {/* Connecting info */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <motion.div
                 animate={{ opacity: [0.6, 1, 0.6] }}
                 transition={{ duration: 1.5, repeat: Infinity }}
@@ -264,44 +289,24 @@ export function VideoCallScreen() {
               </motion.div>
               <p className="text-white/50 text-sm">Calling {otherPersonName}</p>
             </div>
-
-            {/* Cancel button */}
-            <div className="absolute bottom-8">
-              <Button
-                onClick={handleBackToDashboard}
-                variant="outline"
-                className="bg-white/10 text-white border-white/20 hover:bg-white/20 rounded-full px-6"
-              >
-                <PhoneOff className="w-4 h-4 mr-2" />
-                Cancel
-              </Button>
-            </div>
           </motion.div>
         )}
+      </AnimatePresence>
 
-        {/* ========== ACTIVE CALL STATE ========== */}
-        {callState === 'active' && (
-          <motion.div
-            key="active"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col relative overflow-hidden"
-          >
-            {/* Jitsi video call fills the entire screen */}
-            <JitsiCall
-              roomName={roomName}
-              userName={displayName}
-              userEmail={user?.email || undefined}
-              userAvatar={user?.avatar || undefined}
-              onCallEnd={handleJitsiCallEnd}
-              onError={handleJitsiError}
-              onParticipantsChange={setParticipantCount}
-              onMeetingReady={handleMeetingReady}
-            />
-
+      {/* ============================================================
+          Active call overlays (top bar, bottom controls, chat)
+          ============================================================ */}
+      <AnimatePresence>
+        {callState === 'active' && jitsiReady && (
+          <>
             {/* Top Bar Overlay */}
-            <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 sm:px-6 py-3 bg-gradient-to-b from-black/60 to-transparent">
+            <motion.div
+              key="topbar"
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 sm:px-6 py-3 bg-gradient-to-b from-black/60 to-transparent"
+            >
               <div className="flex items-center gap-3">
                 {callStartTime && (
                   <CallTimer startTime={callStartTime} isRunning={true} />
@@ -331,12 +336,18 @@ export function VideoCallScreen() {
                   </button>
                 )}
               </div>
-            </div>
+            </motion.div>
 
             {/* Bottom Control Bar Overlay */}
-            <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-12 bg-gradient-to-t from-black/70 to-transparent">
+            <motion.div
+              key="bottombar"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-12 bg-gradient-to-t from-black/70 to-transparent"
+            >
               <div className="flex items-center gap-3 sm:gap-4">
-                {/* Chat toggle - Jitsi has its own chat, but we also show our panel */}
+                {/* Chat toggle */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setIsChatOpen(!isChatOpen)}
@@ -360,17 +371,21 @@ export function VideoCallScreen() {
                   <PhoneOff className="w-7 h-7 text-white" />
                 </motion.button>
 
-                {/* Toggle video - uses Jitsi command */}
+                {/* Toggle video */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
                   onClick={() => {
-                    const container = document.getElementById('mumaa-jitsi-container')
-                    if (container) {
-                      // Click Jitsi's camera button programmatically
-                      const iframe = container.querySelector('iframe')
-                      if (iframe?.contentWindow) {
-                        iframe.contentWindow.postMessage({ type: 'toggle-camera' }, '*')
+                    // Use Jitsi API command to toggle camera
+                    try {
+                      const container = document.querySelector('[data-jitsi-container]')
+                      if (container) {
+                        const iframe = container.querySelector('iframe')
+                        if (iframe?.contentWindow) {
+                          iframe.contentWindow.postMessage({ type: 'toggle-camera' }, '*')
+                        }
                       }
+                    } catch {
+                      // Ignore
                     }
                   }}
                   className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm flex items-center justify-center transition-colors"
@@ -382,7 +397,7 @@ export function VideoCallScreen() {
               <p className="text-white/30 text-[10px] mt-2">
                 Powered by MUMAA Video
               </p>
-            </div>
+            </motion.div>
 
             {/* Chat Panel */}
             <ChatPanel
@@ -391,17 +406,21 @@ export function VideoCallScreen() {
               otherParticipantName={otherPersonName}
               otherParticipantId={otherPersonId}
             />
-          </motion.div>
+          </>
         )}
+      </AnimatePresence>
 
-        {/* ========== ENDED STATE ========== */}
+      {/* ============================================================
+          Ended state - call summary + review
+          ============================================================ */}
+      <AnimatePresence>
         {callState === 'ended' && (
           <motion.div
             key="ended"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex items-center justify-center bg-gray-950 p-4"
+            className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950 p-4"
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}

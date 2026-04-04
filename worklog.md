@@ -359,3 +359,57 @@ Stage Summary:
 - FREE plan properly blocked from making calls
 - 0 lint errors, all changes compile cleanly
 - Socket service restarted with new HTTP emit endpoint
+---
+Task ID: 9
+Agent: Main Agent
+Task: Comprehensive WebRTC audit - fix all call bugs from every angle (parent side + nanny side)
+
+Work Log:
+- Deep audit of ALL 15+ WebRTC-related files
+- Found 8 bugs, fixed all of them:
+
+**Bug 1 (CRITICAL - App Crash): Chicken-and-egg rendering deadlock in VideoCallScreen**
+- Problem: JitsiCall component was ONLY rendered when callState==='active', but callState only became 'active' when Jitsi reported meeting ready via onMeetingReady callback. Since JitsiCall was never mounted, it could never fire the callback → parent stuck on "Connecting..." forever → client-side crash.
+- Fix: JitsiCall is now ALWAYS rendered for both 'connecting' and 'active' states. Connecting UI shown as an overlay on top. When Jitsi loads and joins room, it triggers transition to active state.
+
+**Bug 2 (CRITICAL): Fragile _mumaaEndCall DOM manipulation pattern**
+- Problem: JitsiCall stored endCall method on DOM element via `containerRef._mumaaEndCall = endCall`. VideoCallScreen accessed it via `document.getElementById('mumaa-jitsi-container')._mumaaEndCall()`. When Jitsi replaced container contents with iframe, the method was lost → end call button broke.
+- Fix: Converted JitsiCall to use React forwardRef + useImperativeHandle pattern. VideoCallScreen now uses `jitsiRef.current.endCall()` — proper React patterns, no DOM hacking.
+
+**Bug 3 (HIGH): NannyCalls.tsx didn't flatten nested API response data**
+- Problem: GET /api/calls returns nested `{ parent: { name, avatar }, nanny: { name, avatar } }` but NannyCalls used `call.parentName` directly → showed "undefined" for names.
+- Fix: Added `flattenCall()` helper that safely converts nested API response to flat CallSession shape.
+
+**Bug 4 (HIGH): MyCalls.tsx (parent side) also didn't flatten API data**
+- Fix: Same flattenCall() helper added to MyCalls.tsx.
+
+**Bug 5 (HIGH): Nanny never notified parent via socket when accepting/declining calls**
+- Problem: IncomingCallDialog and NannyCalls updated DB status but never emitted socket events. Parent had no idea nanny accepted — sat on "Connecting..." screen forever.
+- Fix: Both components now emit `call-accepted` / `call-rejected` socket events via dynamic socket.io-client import after status update.
+
+**Bug 6 (HIGH): Calls status API didn't push real-time socket events**
+- Problem: PUT /api/calls/[id]/status created DB notifications but never pushed real-time events to connected clients via socket service.
+- Fix: Added HTTP POST to socket service after every status change. Both parent and nanny now get real-time notifications when call status changes.
+
+**Bug 7 (MEDIUM): Socket effect had missing dependency and race condition**
+- Problem: Socket effect depended on `user?.id` but used `user.role` inside — stale auth if role changed. Also, async socket init could complete after component unmounted.
+- Fix: Added `user?.role` to dependency array. Added `disconnected` flag to prevent socket init after unmount.
+
+**Bug 8 (MEDIUM): IncomingCallDialog didn't update DB or notify on auto-decline**
+- Problem: When 30-second timer expired, dialog just disappeared without updating call status or notifying caller.
+- Fix: Auto-decline now calls API to set CANCELLED status AND emits socket `call-rejected` event so parent sees "Call Declined" toast.
+
+**Files Modified:**
+- src/components/videocall/JitsiCall.tsx (rewritten — forwardRef + useImperativeHandle + stable ref callbacks)
+- src/components/videocall/VideoCallScreen.tsx (rewritten — JitsiCall always rendered, overlay-based UI states)
+- src/components/videocall/IncomingCallDialog.tsx (socket events on accept/decline/auto-decline)
+- src/components/dashboard/nanny/NannyCalls.tsx (flattenCall + socket events on accept/decline)
+- src/components/dashboard/parent/MyCalls.tsx (flattenCall helper)
+- src/app/api/calls/[id]/status/route.ts (real-time socket push on status changes)
+- src/app/page.tsx (socket dependency fix, race condition fix, toast on call-accepted/ended)
+
+Stage Summary:
+- The ROOT CAUSE of the previous client-side crash was Bug 1: the chicken-and-egg deadlock where JitsiCall was never mounted
+- Complete end-to-end call flow verified: Parent calls → nanny gets real-time notification → nanny accepts → parent sees "Accepted" toast → both join same Jitsi room → call timer → end call → review
+- 0 lint errors, all changes compile cleanly
+- Socket service running on port 3003, dev server on port 3000

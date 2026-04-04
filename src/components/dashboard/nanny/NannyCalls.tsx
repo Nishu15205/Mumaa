@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Phone,
@@ -9,7 +9,6 @@ import {
   Calendar,
   Video,
   DollarSign,
-  User,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
@@ -24,6 +23,36 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import type { CallSession } from '@/types';
 import { CALL_STATUS_LABELS } from '@/lib/constants';
+
+/**
+ * Safely flatten a nested call from the API into a flat CallSession.
+ * API returns: { parent: { name, avatar }, nanny: { name, avatar }, ... }
+ * We need:     { parentName, parentAvatar, nannyName, nannyAvatar, ... }
+ */
+function flattenCall(raw: any): CallSession {
+  return {
+    id: raw.id,
+    parentId: raw.parentId,
+    nannyId: raw.nannyId,
+    parentName: raw.parent?.name || raw.parentName || 'Parent',
+    nannyName: raw.nanny?.name || raw.nannyName || 'Nanny',
+    parentAvatar: raw.parent?.avatar || raw.parentAvatar || null,
+    nannyAvatar: raw.nanny?.avatar || raw.nannyAvatar || null,
+    type: raw.type,
+    status: raw.status,
+    scheduledAt: raw.scheduledAt,
+    startedAt: raw.startedAt,
+    endedAt: raw.endedAt,
+    duration: raw.duration || 0,
+    price: raw.price || 0,
+    notes: raw.notes,
+    callRoomId: raw.callRoomId,
+    rating: raw.rating,
+    reviewComment: raw.reviewComment,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+  };
+}
 
 export default function NannyCalls() {
   const { user } = useAuthStore();
@@ -41,8 +70,10 @@ export default function NannyCalls() {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const res = await apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=100`);
-      setAllCalls((res.calls || []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      const res = await apiGet<{ calls: any[] }>(`/api/calls?userId=${user.id}&limit=100`);
+      // Flatten nested API data into flat CallSession objects
+      const flatCalls = (res.calls || []).map(flattenCall);
+      setAllCalls(flatCalls.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       // empty
     } finally {
@@ -59,6 +90,21 @@ export default function NannyCalls() {
   const handleAccept = async (call: CallSession) => {
     try {
       await apiPut(`/api/calls/${call.id}/status`, { status: 'ACCEPTED' });
+
+      // Notify parent via socket that call was accepted
+      try {
+        const { io } = await import('socket.io-client');
+        const socket = io('/?XTransformPort=3003', { path: '/socket.io' });
+        socket.emit('call-accepted', {
+          callId: call.id,
+          toUserId: call.parentId,
+          roomName: call.callRoomId || null,
+        });
+        setTimeout(() => socket.disconnect(), 1000);
+      } catch {
+        // Non-critical: socket notification failed, call still works
+      }
+
       toast.success('Call accepted! Joining video call...');
       fetchCalls();
 
@@ -78,6 +124,20 @@ export default function NannyCalls() {
   const handleDecline = async (call: CallSession) => {
     try {
       await apiPut(`/api/calls/${call.id}/status`, { status: 'CANCELLED' });
+
+      // Notify parent via socket that call was rejected
+      try {
+        const { io } = await import('socket.io-client');
+        const socket = io('/?XTransformPort=3003', { path: '/socket.io' });
+        socket.emit('call-rejected', {
+          callId: call.id,
+          toUserId: call.parentId,
+        });
+        setTimeout(() => socket.disconnect(), 1000);
+      } catch {
+        // Non-critical
+      }
+
       toast.info('Call declined');
       fetchCalls();
     } catch {
