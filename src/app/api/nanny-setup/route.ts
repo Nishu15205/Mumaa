@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const cleanEmail = email.trim().toLowerCase();
 
     // Find application by email
-    const application = await db.nannyApplication.findUnique({
+    const application = await db.nannyApplication.findFirst({
       where: { email: cleanEmail },
       include: { approvedUser: true },
     });
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
         appliedAt: application.createdAt,
         rejectReason: application.rejectReason,
         isApproved: application.status === 'APPROVED',
-        hasAccount: !!application.approvedUser,
+        hasAccount: !!application.approvedUserId,
       });
     }
 
