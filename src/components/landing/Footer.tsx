@@ -1,8 +1,13 @@
 'use client';
 
 import { Heart } from 'lucide-react';
+import { useAppStore } from '@/stores/app-store';
+import type { AppView } from '@/types';
 
-const footerColumns = [
+const footerColumns: {
+  title: string;
+  links: { label: string; href: string; view?: AppView }[];
+}[] = [
   {
     title: 'Product',
     links: [
@@ -15,7 +20,7 @@ const footerColumns = [
   {
     title: 'Company',
     links: [
-      { label: 'About Us', href: '#' },
+      { label: 'About Us', href: '#', view: 'about' },
       { label: 'Blog', href: '#' },
       { label: 'Careers', href: '#' },
       { label: 'Press', href: '#' },
@@ -33,8 +38,8 @@ const footerColumns = [
   {
     title: 'Legal',
     links: [
-      { label: 'Privacy Policy', href: '#' },
-      { label: 'Terms of Service', href: '#' },
+      { label: 'Privacy Policy', href: '#', view: 'privacy' },
+      { label: 'Terms of Service', href: '#', view: 'terms' },
       { label: 'Cookie Policy', href: '#' },
       { label: 'GDPR', href: '#' },
     ],
@@ -42,7 +47,14 @@ const footerColumns = [
 ];
 
 export default function Footer() {
-  const handleScrollTo = (href: string) => {
+  const { setCurrentView } = useAppStore();
+
+  const handleClick = (href: string, view?: AppView) => {
+    if (view) {
+      setCurrentView(view);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     if (href === '#') return;
     const el = document.querySelector(href);
     if (el) {
@@ -91,7 +103,7 @@ export default function Footer() {
                 {col.links.map((link) => (
                   <li key={link.label}>
                     <button
-                      onClick={() => handleScrollTo(link.href)}
+                      onClick={() => handleClick(link.href, link.view)}
                       className="text-sm text-gray-400 hover:text-rose-400 transition-colors"
                     >
                       {link.label}
@@ -109,7 +121,7 @@ export default function Footer() {
             &copy; 2025 Mumaa. All rights reserved.
           </p>
           <p className="text-sm text-gray-500">
-            Made with <span className="text-rose-500">♥</span> for Indian families
+            Made with <span className="text-rose-500">&#9829;</span> for Indian families
           </p>
         </div>
       </div>

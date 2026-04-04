@@ -74,12 +74,12 @@ export default function Settings() {
     if (!user) return;
     try {
       setSaving(true);
-      const updated = await apiPut('/api/auth/profile', {
+      const updated = await apiPut<{ user: typeof user }>('/api/auth/profile', {
         name,
         phone: phone || null,
         bio: bio || null,
       });
-      setUser(updated as typeof user);
+      setUser(updated.user);
       toast.success('Profile updated successfully');
     } catch {
       toast.error('Failed to update profile');

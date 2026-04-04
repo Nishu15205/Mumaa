@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import type { AppView } from '@/types';
+import OnboardingFlow from '@/components/onboarding/OnboardingFlow';
 
 export default function SignupForm() {
   const [role, setRole] = useState<'PARENT' | 'NANNY'>('PARENT');
@@ -39,6 +40,11 @@ export default function SignupForm() {
 
   const { setUser, setSubscription } = useAuthStore();
   const { setCurrentView } = useAppStore();
+
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingRole, setOnboardingRole] = useState<'PARENT' | 'NANNY'>('PARENT');
+  const [onboardingName, setOnboardingName] = useState('');
 
   const validate = (): boolean => {
     setError('');
@@ -109,17 +115,37 @@ export default function SignupForm() {
         setSubscription(data.subscription);
       }
 
-      const viewMap: Record<string, AppView> = {
-        PARENT: 'parent-dashboard',
-        NANNY: 'nanny-dashboard',
-      };
-      setCurrentView(viewMap[data.user.role] || 'landing');
+      // Trigger onboarding after signup
+      setOnboardingRole(role);
+      setOnboardingName(data.user.name || name);
+      setShowOnboarding(true);
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  // Onboarding complete handler
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+    const viewMap: Record<string, AppView> = {
+      PARENT: 'parent-dashboard',
+      NANNY: 'nanny-dashboard',
+    };
+    setCurrentView(viewMap[onboardingRole] || 'landing');
+  };
+
+  // Show onboarding flow if triggered
+  if (showOnboarding) {
+    return (
+      <OnboardingFlow
+        role={onboardingRole}
+        userName={onboardingName}
+        onComplete={handleOnboardingComplete}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-rose-50 via-pink-50 to-orange-50 px-4 py-12">

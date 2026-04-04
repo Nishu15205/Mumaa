@@ -45,9 +45,10 @@ export default function ParentDashboard({ onNavigate }: { onNavigate?: (page: st
     if (!user?.id) return;
     try {
       setLoading(true);
-      const [callsData] = await Promise.all([
-        apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=10`),
+      const [callsRes] = await Promise.all([
+        apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=10`),
       ]);
+      const callsData = callsRes.calls || [];
       setRecentCalls(callsData.slice(0, 5));
       setUpcomingCalls(callsData.filter((c: CallSession) => c.status === 'ACCEPTED' || c.status === 'PENDING'));
       setStats({

@@ -5,6 +5,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const skill = searchParams.get('skill');
+    const search = searchParams.get('search');
     const minRating = searchParams.get('minRating');
     const language = searchParams.get('language');
     const available = searchParams.get('available');
@@ -27,6 +28,13 @@ export async function GET(req: NextRequest) {
 
     if (language) {
       where.languages = { contains: language };
+    }
+
+    if (search) {
+      where.OR = [
+        { user: { name: { contains: search } } },
+        { skills: { contains: search } },
+      ];
     }
 
     const nannies = await db.nannyProfile.findMany({

@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { PRICING_PLANS } from '@/lib/constants';
 import type { Subscription, CallSession } from '@/types';
+import CheckoutDialog from '@/components/payment/CheckoutDialog';
 
 export default function SubscriptionPage() {
   const { user, subscription, setSubscription } = useAuthStore();
@@ -41,6 +42,7 @@ export default function SubscriptionPage() {
   const [loading, setLoading] = useState(true);
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -50,12 +52,12 @@ export default function SubscriptionPage() {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const [subData, callsData] = await Promise.all([
-        apiGet<Subscription>(`/api/subscriptions?userId=${user.id}`),
-        apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=100`),
+      const [subRes, callsRes] = await Promise.all([
+        apiGet<{ subscription: Subscription }>(`/api/subscriptions?userId=${user.id}`),
+        apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=100`),
       ]);
-      setSubscription(subData);
-      setCalls(callsData);
+      setSubscription(subRes.subscription);
+      setCalls(callsRes.calls || []);
     } catch {
       // empty
     } finally {
@@ -63,28 +65,21 @@ export default function SubscriptionPage() {
     }
   };
 
-  const handleUpgrade = async (planId: string) => {
-    try {
-      setUpgrading(planId);
-      const newSub = await apiPost<Subscription>('/api/subscriptions/upgrade', {
-        userId: user?.id,
-        plan: planId,
-      });
-      setSubscription(newSub);
-      toast.success(`Upgraded to ${planId} plan!`);
-    } catch {
-      toast.error('Failed to upgrade subscription');
-    } finally {
-      setUpgrading(null);
-    }
+  const handleUpgrade = (planId: string) => {
+    setCheckoutPlan(planId);
+  };
+
+  const handleCheckoutSuccess = (sub: Subscription) => {
+    setSubscription(sub);
+    setCheckoutPlan(null);
   };
 
   const handleCancel = async () => {
     try {
-      const newSub = await apiPost<Subscription>('/api/subscriptions/cancel', {
+      const res = await apiPost<{ subscription: Subscription }>('/api/subscriptions/cancel', {
         userId: user?.id,
       });
-      setSubscription(newSub);
+      setSubscription(res.subscription);
       setShowCancelDialog(false);
       toast.success('Subscription cancelled');
     } catch {
@@ -255,7 +250,7 @@ export default function SubscriptionPage() {
                       ))}
                     </ul>
                     <Button
-                      disabled={isCurrent || upgrading === plan.id}
+                      disabled={isCurrent}
                       onClick={() => handleUpgrade(plan.id)}
                       variant={isCurrent ? 'secondary' : isPopular ? 'default' : 'outline'}
                       className={cn(
@@ -265,12 +260,10 @@ export default function SubscriptionPage() {
                         !isCurrent && !isPopular && 'border-gray-200'
                       )}
                     >
-                      {upgrading === plan.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : isCurrent ? (
+                      {isCurrent ? (
                         'Current Plan'
                       ) : (
-                        'Upgrade'
+                        'Start Free Trial'
                       )}
                     </Button>
                   </CardContent>
@@ -280,6 +273,17 @@ export default function SubscriptionPage() {
           })}
         </div>
       </div>
+
+      {/* Checkout Dialog */}
+      <CheckoutDialog
+        open={!!checkoutPlan}
+        onOpenChange={(open) => {
+          if (!open) setCheckoutPlan(null);
+        }}
+        planId={checkoutPlan || 'BASIC'}
+        userId={user?.id || ''}
+        onSuccess={handleCheckoutSuccess}
+      />
 
       {/* Cancel dialog */}
       <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>

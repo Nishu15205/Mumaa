@@ -34,7 +34,9 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import type { NannyProfile } from '@/types';
+import ScheduleDialog from '@/components/dashboard/ScheduleDialog';
+import NannyProfileDialog from '@/components/dashboard/NannyProfileDialog';
+import type { NannyProfile, CallSession } from '@/types';
 
 interface NannyWithUser extends NannyProfile {
   user?: {
@@ -60,6 +62,10 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
   const [sortBy, setSortBy] = useState('rating');
   const [showFilters, setShowFilters] = useState(false);
   const [callingNanny, setCallingNanny] = useState<string | null>(null);
+  const [selectedNanny, setSelectedNanny] = useState<NannyWithUser | null>(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [profileNanny, setProfileNanny] = useState<NannyWithUser | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const fetchNannies = useCallback(async () => {
     try {
@@ -71,8 +77,8 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
       params.append('sort', sortBy);
       params.append('available', 'true');
 
-      const data = await apiGet<NannyWithUser[]>(`/api/nannies?${params.toString()}`);
-      setNannies(data);
+      const res = await apiGet<{ nannies: NannyWithUser[] }>(`/api/nannies?${params.toString()}`);
+      setNannies(res.nannies || []);
     } catch {
       toast.error('Failed to load nannies');
     } finally {
@@ -89,12 +95,12 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
     if (!user || !nanny.userId) return;
     try {
       setCallingNanny(nanny.userId);
-      const call = await apiPost('/api/calls/instant', {
+      const res = await apiPost<{ call: CallSession }>('/api/calls/instant', {
         parentId: user.id,
         nannyId: nanny.userId,
       });
       toast.success('Call request sent!');
-      startCall(call);
+      startCall(res.call);
     } catch {
       toast.error('Failed to start call. The nanny may be offline.');
     } finally {
@@ -355,7 +361,10 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => onSchedule?.(nanny)}
+                        onClick={() => {
+                          setSelectedNanny(nanny);
+                          setScheduleOpen(true);
+                        }}
                         className="flex-1 border-rose-200 text-rose-600 hover:bg-rose-50 text-sm gap-1.5 h-8"
                       >
                         <Calendar className="h-3.5 w-3.5" />
@@ -364,7 +373,10 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => onViewProfile?.(nanny)}
+                        onClick={() => {
+                          setProfileNanny(nanny);
+                          setProfileOpen(true);
+                        }}
                         className="h-8 w-8 p-0 text-gray-400 hover:text-gray-600"
                       >
                         <Eye className="h-3.5 w-3.5" />
@@ -377,6 +389,27 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
           </AnimatePresence>
         </div>
       )}
+      {/* Dialogs */}
+      <ScheduleDialog
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        nanny={selectedNanny}
+        onSuccess={() => fetchNannies()}
+      />
+      <NannyProfileDialog
+        open={profileOpen}
+        onOpenChange={setProfileOpen}
+        nanny={profileNanny}
+        onCall={(nanny) => {
+          setProfileOpen(false);
+          handleCallNow(nanny);
+        }}
+        onSchedule={(nanny) => {
+          setProfileOpen(false);
+          setSelectedNanny(nanny);
+          setScheduleOpen(true);
+        }}
+      />
     </div>
   );
 }

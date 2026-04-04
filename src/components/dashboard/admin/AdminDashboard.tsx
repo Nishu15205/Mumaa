@@ -54,18 +54,28 @@ export default function AdminDashboard({ onNavigate }: { onNavigate?: (page: str
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsData, usersData] = await Promise.all([
-        apiGet<AdminStats>('/api/admin/stats'),
-        apiGet<UserType[]>('/api/admin/users?limit=5'),
+      const [statsRes, usersRes] = await Promise.all([
+        apiGet<{ stats: { totalUsers: number; totalNannies: number; totalParents: number; totalCalls: number; activeCalls: number; completedCalls: number; totalRevenue: number; activeSubscriptions: number } }>('/api/admin/stats'),
+        apiGet<{ users: UserType[] }>('/api/admin/users?limit=5'),
       ]);
-      setStats(statsData);
-      setRecentUsers(usersData);
+      const apiStats = statsRes.stats;
+      setStats({
+        totalUsers: apiStats.totalUsers,
+        parents: apiStats.totalParents,
+        nannies: apiStats.totalNannies,
+        calls: apiStats.totalCalls,
+        activeCalls: apiStats.activeCalls,
+        completedCalls: apiStats.completedCalls,
+        revenue: apiStats.totalRevenue,
+        subscriptions: apiStats.activeSubscriptions,
+      });
+      setRecentUsers(usersRes.users || []);
 
       // Generate growth data (last 6 months)
       const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
       setGrowthData(months.map((m, i) => ({
         month: m,
-        users: Math.round((statsData.totalUsers / 6) * (i + 1) + Math.random() * 5),
+        users: Math.round((apiStats.totalUsers / 6) * (i + 1) + Math.random() * 5),
       })));
     } catch {
       // empty

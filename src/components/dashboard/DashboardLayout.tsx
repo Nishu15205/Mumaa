@@ -22,6 +22,7 @@ import {
   UserCheck,
   Star,
 } from 'lucide-react';
+import NotificationPanel from '@/components/dashboard/NotificationPanel';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import { useNotificationStore } from '@/stores/notification-store';
@@ -80,7 +81,7 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children, activePage = 'dashboard', onPageChange }: DashboardLayoutProps) {
   const { user, logout } = useAuthStore();
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useAppStore();
-  const { unreadCount, notifications, togglePanel } = useNotificationStore();
+  const { notifications } = useNotificationStore();
   const [searchQuery, setSearchQuery] = useState('');
 
   const navItems = user?.role === 'ADMIN' ? adminNav : user?.role === 'NANNY' ? nannyNav : parentNav;
@@ -254,21 +255,9 @@ export default function DashboardLayout({ children, activePage = 'dashboard', on
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 relative">
             {/* Notifications */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative h-9 w-9"
-              onClick={togglePanel}
-            >
-              <Bell className="h-5 w-5 text-gray-500" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 h-5 w-5 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </Button>
+            <NotificationPanel />
 
             {/* User dropdown */}
             <DropdownMenu>

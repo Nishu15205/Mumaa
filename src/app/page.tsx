@@ -10,6 +10,7 @@ import { apiGet } from '@/lib/api';
 import LandingPage from '@/components/landing/LandingPage';
 import LoginForm from '@/components/auth/LoginForm';
 import SignupForm from '@/components/auth/SignupForm';
+import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm';
 import { PricingPage } from '@/components/pricing/PricingPage';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 
@@ -30,6 +31,7 @@ import AdminCalls from '@/components/dashboard/admin/AdminCalls';
 import Settings from '@/components/dashboard/Settings';
 import { VideoCallScreen } from '@/components/videocall/VideoCallScreen';
 import { IncomingCallDialog } from '@/components/videocall/IncomingCallDialog';
+import LegalPages from '@/components/common/LegalPages';
 
 function LoadingScreen() {
   return (
@@ -156,7 +158,7 @@ export default function Home() {
         setCurrentView(view);
       }
     } else if (!isAuthenticated) {
-      if (currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup' && currentView !== 'pricing') {
+      if (currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup' && currentView !== 'forgot-password' && currentView !== 'pricing' && currentView !== 'terms' && currentView !== 'privacy' && currentView !== 'about') {
         setCurrentView('landing');
       }
     }
@@ -231,7 +233,7 @@ export default function Home() {
       {!showVideoCall && (
         <AnimatePresence mode="wait">
           {/* Public Pages */}
-          {(!isAuthenticated || currentView === 'landing' || currentView === 'login' || currentView === 'signup' || currentView === 'pricing') && (
+          {(!isAuthenticated || currentView === 'landing' || currentView === 'login' || currentView === 'signup' || currentView === 'forgot-password' || currentView === 'pricing' || currentView === 'terms' || currentView === 'privacy' || currentView === 'about') && (
             <motion.div
               key={currentView}
               initial={{ opacity: 0, y: 20 }}
@@ -250,10 +252,21 @@ export default function Home() {
                   <SignupForm />
                 </div>
               )}
+              {currentView === 'forgot-password' && (
+                <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-rose-50 via-white to-pink-50 px-4">
+                  <ForgotPasswordForm />
+                </div>
+              )}
               {currentView === 'pricing' && (
                 <div className="min-h-screen bg-white">
                   <PricingPage />
                 </div>
+              )}
+              {(currentView === 'terms' || currentView === 'privacy' || currentView === 'about') && (
+                <LegalPages
+                  page={currentView as 'terms' | 'privacy' | 'about'}
+                  onBack={() => setCurrentView('landing')}
+                />
               )}
             </motion.div>
           )}

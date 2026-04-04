@@ -42,8 +42,8 @@ export default function NannyCalls() {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const data = await apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=100`);
-      setAllCalls(data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      const res = await apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=100`);
+      setAllCalls((res.calls || []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       // empty
     } finally {

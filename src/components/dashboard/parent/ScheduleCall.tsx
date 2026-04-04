@@ -84,13 +84,13 @@ export default function ScheduleCall() {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const [nanniesData, callsData] = await Promise.all([
-        apiGet<NannyWithUser[]>('/api/nannies'),
-        apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=50`),
+      const [nanniesRes, callsRes] = await Promise.all([
+        apiGet<{ nannies: NannyWithUser[] }>('/api/nannies'),
+        apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=50`),
       ]);
-      setNannies(nanniesData.filter((n: NannyWithUser) => n.isAvailable));
+      setNannies((nanniesRes.nannies || []).filter((n: NannyWithUser) => n.isAvailable));
       setScheduledCalls(
-        callsData
+        (callsRes.calls || [])
           .filter((c: CallSession) => c.type === 'SCHEDULED' && c.status !== 'CANCELLED')
           .sort((a: CallSession, b: CallSession) => new Date(b.scheduledAt || '').getTime() - new Date(a.scheduledAt || '').getTime())
       );

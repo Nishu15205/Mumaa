@@ -154,11 +154,15 @@ export type AppView =
   | 'landing'
   | 'login'
   | 'signup'
+  | 'forgot-password'
   | 'parent-dashboard'
   | 'nanny-dashboard'
   | 'admin-dashboard'
   | 'pricing'
-  | 'profile';
+  | 'profile'
+  | 'terms'
+  | 'privacy'
+  | 'about';
 
 // ---------- Incoming Call ----------
 

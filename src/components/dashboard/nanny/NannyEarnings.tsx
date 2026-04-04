@@ -43,11 +43,12 @@ export default function NannyEarnings() {
     if (!user?.id) return;
     try {
       setLoading(true);
-      const [profileData, callsData] = await Promise.all([
-        apiGet<NannyProfile>(`/api/nannies/${user.id}`),
-        apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=100`),
+      const [profileRes, callsRes] = await Promise.all([
+        apiGet<{ nanny: NannyProfile; reviews: unknown[] }>(`/api/nannies/${user.id}`),
+        apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=100`),
       ]);
-      setProfile(profileData);
+      setProfile(profileRes.nanny);
+      const callsData = callsRes.calls || [];
       setCalls(callsData.filter((c) => c.status === 'COMPLETED'));
 
       // Generate 30-day chart data

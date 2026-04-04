@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Mic,
@@ -8,6 +8,7 @@ import {
   Video,
   VideoOff,
   MonitorUp,
+  MonitorOff,
   PhoneOff,
   MessageSquare,
   MoreVertical,
@@ -18,7 +19,9 @@ import {
   RefreshCw,
   Copy,
   Check,
+  CameraOff,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/stores/app-store'
@@ -48,6 +51,13 @@ export function VideoCallScreen() {
   const [copied, setCopied] = useState(false)
   const [otherPersonName, setOtherPersonName] = useState('')
   const [otherPersonId, setOtherPersonId] = useState('')
+  const [cameraDenied, setCameraDenied] = useState(false)
+
+  // Refs for media streams and video element
+  const localVideoRef = useRef<HTMLVideoElement>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
+  const isCleaningUpRef = useRef(false)
 
   // Determine other participant info
   useEffect(() => {
@@ -61,6 +71,194 @@ export function VideoCallScreen() {
       setOtherPersonId(currentCall.parentId)
     }
   }, [currentCall, user])
+
+  // Helper: stop all tracks in a stream
+  const stopStreamTracks = useCallback((stream: MediaStream | null) => {
+    if (!stream) return
+    stream.getTracks().forEach((track) => {
+      track.stop()
+    })
+  }, [])
+
+  // Helper: set video element source from a stream
+  const attachStreamToVideo = useCallback((stream: MediaStream) => {
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream
+    }
+  }, [])
+
+  // Request camera and microphone when call becomes active
+  useEffect(() => {
+    if (callState !== 'active') return
+
+    let cancelled = false
+
+    const startLocalMedia = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: 'user',
+          },
+          audio: true,
+        })
+
+        if (cancelled) {
+          stopStreamTracks(stream)
+          return
+        }
+
+        localStreamRef.current = stream
+        setCameraDenied(false)
+
+        // Attach to video element
+        attachStreamToVideo(stream)
+
+        // Apply current mute/camera state to the new stream
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = !isMuted
+        })
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = !isCameraOff
+        })
+      } catch (error: unknown) {
+        if (cancelled) return
+
+        const err = error as DOMException
+        if (
+          err.name === 'NotAllowedError' ||
+          err.name === 'PermissionDeniedError'
+        ) {
+          setCameraDenied(true)
+          toast.error('Camera/Microphone Access Denied', {
+            description:
+              'Please allow camera and microphone access in your browser settings to use video calling.',
+          })
+        } else if (
+          err.name === 'NotFoundError' ||
+          err.name === 'DevicesNotFoundError'
+        ) {
+          setCameraDenied(true)
+          toast.warning('No Camera/Microphone Found', {
+            description:
+              'No camera or microphone device was detected on your system.',
+          })
+        } else {
+          setCameraDenied(true)
+          toast.error('Media Access Error', {
+            description: `Could not access camera/microphone: ${err.message || 'Unknown error'}`,
+          })
+        }
+      }
+    }
+
+    startLocalMedia()
+
+    return () => {
+      cancelled = true
+    }
+  }, [callState, isMuted, isCameraOff, stopStreamTracks, attachStreamToVideo])
+
+  // Sync audio track enabled state with isMuted
+  useEffect(() => {
+    const stream = screenStreamRef.current || localStreamRef.current
+    if (!stream) return
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted
+    })
+  }, [isMuted])
+
+  // Sync video track enabled state with isCameraOff (only when not screen sharing)
+  useEffect(() => {
+    if (isScreenSharing) return
+    if (!localStreamRef.current) return
+    localStreamRef.current.getVideoTracks().forEach((track) => {
+      track.enabled = !isCameraOff
+    })
+  }, [isCameraOff, isScreenSharing])
+
+  // Screen sharing toggle
+  const handleToggleScreenShare = useCallback(async () => {
+    if (isScreenSharing) {
+      // Stop screen sharing — switch back to camera
+      stopStreamTracks(screenStreamRef.current)
+      screenStreamRef.current = null
+      setIsScreenSharing(false)
+
+      // Restore camera stream to video element
+      if (localStreamRef.current) {
+        attachStreamToVideo(localStreamRef.current)
+      }
+      return
+    }
+
+    // Start screen sharing
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always',
+        } as MediaTrackConstraints,
+        audio: false,
+      })
+
+      screenStreamRef.current = screenStream
+      setIsScreenSharing(true)
+
+      // Replace self-view with screen stream
+      attachStreamToVideo(screenStream)
+
+      // Listen for the user stopping screen share via browser UI
+      screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+        stopStreamTracks(screenStreamRef.current)
+        screenStreamRef.current = null
+        setIsScreenSharing(false)
+        if (localStreamRef.current) {
+          attachStreamToVideo(localStreamRef.current)
+        }
+      })
+
+      toast.success('Screen Sharing Started', {
+        description: 'Your screen is now visible to other participants.',
+      })
+    } catch (error: unknown) {
+      // User cancelled the screen share picker — silently ignore
+      const err = error as DOMException
+      if (err.name !== 'AbortError' && err.name !== 'NotAllowedError') {
+        toast.error('Screen Sharing Failed', {
+          description: 'Could not start screen sharing. Please try again.',
+        })
+      }
+    }
+  }, [isScreenSharing, stopStreamTracks, attachStreamToVideo])
+
+  // Handle mute toggle
+  const handleToggleMute = useCallback(() => {
+    setIsMuted((prev) => !prev)
+  }, [])
+
+  // Handle camera toggle
+  const handleToggleCamera = useCallback(() => {
+    setIsCameraOff((prev) => !prev)
+  }, [])
+
+  // Cleanup all streams
+  const cleanupStreams = useCallback(() => {
+    if (isCleaningUpRef.current) return
+    isCleaningUpRef.current = true
+
+    stopStreamTracks(localStreamRef.current)
+    localStreamRef.current = null
+    stopStreamTracks(screenStreamRef.current)
+    screenStreamRef.current = null
+
+    // Clear video element source
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null
+    }
+
+    isCleaningUpRef.current = false
+  }, [stopStreamTracks])
 
   // Simulate call connection
   useEffect(() => {
@@ -86,10 +284,18 @@ export function VideoCallScreen() {
     return () => clearInterval(qualityTimer)
   }, [callState])
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanupStreams()
+    }
+  }, [cleanupStreams])
+
   const handleEndCall = useCallback(() => {
+    cleanupStreams()
     setCallState('ended')
     setIsChatOpen(false)
-  }, [])
+  }, [cleanupStreams])
 
   const handleSubmitReview = useCallback(async () => {
     if (!rating || !currentCall) return
@@ -102,11 +308,16 @@ export function VideoCallScreen() {
   }, [rating, currentCall])
 
   const handleBackToDashboard = useCallback(() => {
+    cleanupStreams()
     endCall()
     setCallState('connecting')
     setRating(0)
     setReviewComment('')
-  }, [endCall])
+    setCameraDenied(false)
+    setIsMuted(false)
+    setIsCameraOff(false)
+    setIsScreenSharing(false)
+  }, [endCall, cleanupStreams])
 
   const copyRoomId = useCallback(() => {
     if (currentCall?.callRoomId) {
@@ -125,6 +336,9 @@ export function VideoCallScreen() {
     : 0
   const endedMinutes = Math.floor(endedDuration / 60)
   const endedSeconds = endedDuration % 60
+
+  // Determine self-view content: real video or fallback placeholder
+  const showRealVideo = !cameraDenied && !isCameraOff && localStreamRef.current
 
   return (
     <motion.div
@@ -208,6 +422,14 @@ export function VideoCallScreen() {
                     {callQuality === 'excellent' ? 'Excellent' : callQuality === 'good' ? 'Good' : 'Poor'}
                   </span>
                 </div>
+                {isScreenSharing && (
+                  <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 backdrop-blur-sm">
+                    <MonitorUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-[11px] font-medium text-emerald-400">
+                      Sharing
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -229,13 +451,23 @@ export function VideoCallScreen() {
               </div>
             </div>
 
-            {/* Main Video (other person) */}
+            {/* Main Video (other person - placeholder since no peer-to-peer) */}
             <div className="flex-1 relative">
               <VideoPlaceholder
                 name={otherPersonName}
                 size="full"
                 showMuted={true}
               />
+
+              {/* Camera denied banner */}
+              {cameraDenied && (
+                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/20 border border-amber-500/30 backdrop-blur-sm">
+                  <CameraOff className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs text-amber-300 font-medium">
+                    Camera unavailable — audio-only mode
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Self-view (PiP) */}
@@ -243,13 +475,38 @@ export function VideoCallScreen() {
               initial={{ scale: 0.8, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.3 }}
-              className="absolute bottom-24 right-4 sm:bottom-28 sm:right-6 z-10 w-36 h-24 sm:w-44 sm:h-32 rounded-2xl overflow-hidden shadow-xl border-2 border-white/20"
+              className="absolute bottom-24 right-4 sm:bottom-28 sm:right-6 z-10 w-36 h-24 sm:w-44 sm:h-32 rounded-2xl overflow-hidden shadow-xl border-2 border-white/20 bg-gray-900"
             >
-              <VideoPlaceholder
-                name={user?.name || 'You'}
-                size="small"
-                showMuted={isCameraOff}
-              />
+              {/* Real video feed when available and camera not off */}
+              {!cameraDenied && (
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover rounded-2xl ${
+                    !isCameraOff ? 'block' : 'hidden'
+                  } ${!isScreenSharing ? '[transform:scaleX(-1)]' : ''}`}
+                />
+              )}
+
+              {/* Fallback placeholder when camera is off or denied */}
+              {(cameraDenied || isCameraOff) && (
+                <div className="w-full h-full">
+                  <VideoPlaceholder
+                    name={user?.name || 'You'}
+                    size="small"
+                    showMuted={true}
+                  />
+                </div>
+              )}
+
+              {/* Muted indicator overlay */}
+              {isMuted && !cameraDenied && !isCameraOff && (
+                <div className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center">
+                  <MicOff className="w-2.5 h-2.5 text-white" />
+                </div>
+              )}
             </motion.div>
 
             {/* More Options Menu */}
@@ -285,7 +542,7 @@ export function VideoCallScreen() {
                 {/* Mute */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => setIsMuted(!isMuted)}
+                  onClick={handleToggleMute}
                   className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-colors ${
                     isMuted
                       ? 'bg-white text-gray-900'
@@ -298,7 +555,7 @@ export function VideoCallScreen() {
                 {/* Camera */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => setIsCameraOff(!isCameraOff)}
+                  onClick={handleToggleCamera}
                   className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-colors ${
                     isCameraOff
                       ? 'bg-white text-gray-900'
@@ -311,14 +568,14 @@ export function VideoCallScreen() {
                 {/* Screen Share */}
                 <motion.button
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => setIsScreenSharing(!isScreenSharing)}
+                  onClick={handleToggleScreenShare}
                   className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-colors ${
                     isScreenSharing
                       ? 'bg-emerald-500 text-white'
                       : 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm'
                   }`}
                 >
-                  <MonitorUp className="w-5 h-5" />
+                  {isScreenSharing ? <MonitorOff className="w-5 h-5" /> : <MonitorUp className="w-5 h-5" />}
                 </motion.button>
 
                 {/* End Call */}

@@ -50,12 +50,12 @@ export default function NannyDashboard({ onNavigate }: { onNavigate?: (page: str
     if (!user?.id) return;
     try {
       setLoading(true);
-      const [profileData, callsData] = await Promise.all([
-        apiGet<NannyProfile>(`/api/nannies/${user.id}`),
-        apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=10`),
+      const [profileRes, callsRes] = await Promise.all([
+        apiGet<{ nanny: NannyProfile; reviews: unknown[] }>(`/api/nannies/${user.id}`),
+        apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=10`),
       ]);
-      setProfile(profileData);
-      setRecentCalls(callsData.slice(0, 5));
+      setProfile(profileRes.nanny);
+      setRecentCalls((callsRes.calls || []).slice(0, 5));
 
       // Generate sample weekly earnings data (last 7 days)
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

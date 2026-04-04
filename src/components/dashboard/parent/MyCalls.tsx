@@ -21,6 +21,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import ReviewDialog from '@/components/dashboard/ReviewDialog';
 import type { CallSession } from '@/types';
 import { CALL_STATUS_LABELS } from '@/lib/constants';
 
@@ -31,6 +32,8 @@ export default function MyCalls({ onReview }: { onReview?: (call: CallSession) =
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
   const [visibleCount, setVisibleCount] = useState(10);
+  const [reviewCall, setReviewCall] = useState<CallSession | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
     fetchCalls();
@@ -40,8 +43,8 @@ export default function MyCalls({ onReview }: { onReview?: (call: CallSession) =
     if (!user?.id) return;
     try {
       setLoading(true);
-      const data = await apiGet<CallSession[]>(`/api/calls?userId=${user.id}&limit=100`);
-      setAllCalls(data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      const res = await apiGet<{ calls: CallSession[] }>(`/api/calls?userId=${user.id}&limit=100`);
+      setAllCalls((res.calls || []).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       // empty
     } finally {
@@ -177,7 +180,10 @@ export default function MyCalls({ onReview }: { onReview?: (call: CallSession) =
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => onReview?.(call)}
+                      onClick={() => {
+                        setReviewCall(call);
+                        setReviewOpen(true);
+                      }}
                       className="border-amber-200 text-amber-600 hover:bg-amber-50 text-xs gap-1 h-7"
                     >
                       <MessageSquare className="h-3 w-3" />
@@ -272,6 +278,13 @@ export default function MyCalls({ onReview }: { onReview?: (call: CallSession) =
           )}
         </TabsContent>
       </Tabs>
+      {/* Review Dialog */}
+      <ReviewDialog
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        call={reviewCall}
+        onSuccess={() => fetchCalls()}
+      />
     </div>
   );
 }

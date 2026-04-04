@@ -55,8 +55,8 @@ export default function AdminCalls() {
       params.append('limit', pageSize.toString());
       params.append('offset', ((page - 1) * pageSize).toString());
 
-      const data = await apiGet<CallSession[]>(`/api/admin/calls?${params.toString()}`);
-      setCalls(data);
+      const res = await apiGet<{ calls: CallSession[] }>(`/api/admin/calls?${params.toString()}`);
+      setCalls(res.calls || []);
     } catch {
       // empty
     } finally {

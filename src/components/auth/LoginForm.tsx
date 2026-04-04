@@ -154,6 +154,7 @@ export default function LoginForm() {
                 {!isAdmin && (
                   <button
                     type="button"
+                    onClick={() => setCurrentView('forgot-password')}
                     className="text-xs text-rose-600 hover:text-rose-700 font-medium"
                   >
                     Forgot Password?

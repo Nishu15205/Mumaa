@@ -76,9 +76,9 @@ export default function AdminUsers() {
       params.append('limit', pageSize.toString());
       params.append('offset', ((page - 1) * pageSize).toString());
 
-      const data = await apiGet<UserWithProfile[]>(`/api/admin/users?${params.toString()}`);
-      setUsers(data);
-      setTotalUsers(data.length);
+      const res = await apiGet<{ users: UserWithProfile[] }>(`/api/admin/users?${params.toString()}`);
+      setUsers(res.users || []);
+      setTotalUsers((res.users || []).length);
     } catch {
       toast.error('Failed to load users');
     } finally {
