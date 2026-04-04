@@ -432,3 +432,35 @@ Work Log:
 Stage Summary:
 - All 4 demo accounts ready for testing
 - Dev server (3000) + Socket service (3003) both running
+
+---
+Task ID: 11
+Agent: Main Agent
+Task: Fix parent sidebar, redesign call flow with 5-min wait, clean up calling screen
+
+Work Log:
+- **Bug 1: Sidebar not visible on desktop** — Framer Motion's `animate={{ x: -280 }}` inline style overrode CSS `lg:translate-x-0`. Fixed by replacing `<motion.aside>` with plain `<aside>` using Tailwind CSS transitions instead of JS animation.
+- **Bug 2: Call opened directly without nanny joining** — "Call Now" button immediately opened Jitsi video. Redesigned flow:
+  1. "Call Now" → "Join" button
+  2. Clicking Join creates call in DB + shows clean waiting screen
+  3. 5-minute countdown timer visible
+  4. Jitsi NOT loaded until nanny accepts
+  5. Socket `call-accepted` event triggers transition from waiting → connecting
+  6. Auto-cancel after 5 minutes with toast
+- **Bug 3: Too much text on calling screen** — Removed room ID copy, "Powered by MUMAA Video" text, "Calling {name}" subtitle. Connecting screen now shows just "Connecting..." text, avatar, pulse ring, and cancel button.
+- Added `waitingForNanny` boolean to app store
+- VideoCallScreen now has 4 states: `waiting` → `connecting` → `active` → `ended`
+- Updated page.tsx socket handler to check `waitingForNanny` state on `call-accepted`
+
+Files Modified:
+- src/components/dashboard/DashboardLayout.tsx (sidebar fix)
+- src/stores/app-store.ts (waitingForNanny state)
+- src/components/dashboard/parent/FindNannies.tsx (Call Now → Join, waiting flow)
+- src/components/videocall/VideoCallScreen.tsx (waiting state, clean UI)
+- src/app/page.tsx (socket handler for waiting→connecting transition)
+
+Stage Summary:
+- Sidebar always visible on desktop, slides on mobile
+- Call flow: Join → Wait (5min countdown) → Nanny accepts → Jitsi loads → Call active
+- Clean, minimal calling screens with no excess text
+- 0 lint errors, compiles cleanly

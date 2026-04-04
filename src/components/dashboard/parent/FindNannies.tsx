@@ -9,12 +9,13 @@ import {
   Phone,
   Calendar,
   Eye,
-  ChevronDown,
+  X,
   Globe,
   Briefcase,
-  Clock,
   Sparkles,
-  X,
+  UserPlus,
+  Video,
+  Clock,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
@@ -48,12 +49,9 @@ interface NannyWithUser extends NannyProfile {
   } | null;
 }
 
-export default function FindNannies({ onViewProfile, onSchedule }: {
-  onViewProfile?: (nanny: NannyWithUser) => void;
-  onSchedule?: (nanny: NannyWithUser) => void;
-}) {
+export default function FindNannies() {
   const { user } = useAuthStore();
-  const { startCall } = useAppStore();
+  const { startCall, setWaitingForNanny, currentCall } = useAppStore();
   const [nannies, setNannies] = useState<NannyWithUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -61,7 +59,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
   const [minRating, setMinRating] = useState('0');
   const [sortBy, setSortBy] = useState('rating');
   const [showFilters, setShowFilters] = useState(false);
-  const [callingNanny, setCallingNanny] = useState<string | null>(null);
+  const [joiningNanny, setJoiningNanny] = useState<string | null>(null);
   const [selectedNanny, setSelectedNanny] = useState<NannyWithUser | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [profileNanny, setProfileNanny] = useState<NannyWithUser | null>(null);
@@ -92,24 +90,25 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
     return () => clearTimeout(debounce);
   }, [fetchNannies]);
 
-  const handleCallNow = async (nanny: NannyWithUser) => {
+  const handleJoinCall = async (nanny: NannyWithUser) => {
     if (!user || !nanny.userId) return;
 
-    // Prevent double-clicking
-    const { currentCall } = useAppStore.getState();
+    // Prevent double action
     if (currentCall) {
-      toast.error('You already have an active call. Please end it first.');
+      toast.error('You already have an active call.');
       return;
     }
 
     try {
-      setCallingNanny(nanny.userId);
+      setJoiningNanny(nanny.userId);
+
+      // 1. Create call in DB
       const res = await apiPost<{ call: any }>('/api/calls/instant', {
         parentId: user.id,
         nannyId: nanny.userId,
       });
 
-      // Flatten nested parent/nanny data into flat CallSession shape
+      // 2. Flatten nested data
       const rawCall = res.call;
       const flatCall: CallSession = {
         id: rawCall.id,
@@ -134,12 +133,14 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
         updatedAt: rawCall.updatedAt,
       };
 
-      toast.success('Call request sent! Waiting for nanny...');
+      // 3. Set call + show waiting screen (NOT video call yet)
+      useAppStore.getState().setWaitingForNanny(true);
       startCall(flatCall);
+      toast.success('Waiting for nanny to join...');
     } catch {
-      toast.error('Failed to start call. The nanny may be offline.');
+      toast.error('Failed to connect. Nanny may be offline.');
     } finally {
-      setCallingNanny(null);
+      setJoiningNanny(null);
     }
   };
 
@@ -340,7 +341,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
                         <div className="flex items-center gap-1 mt-0.5">
                           {renderStars(nanny.rating)}
                           <span className="text-xs text-gray-500 ml-1">
-                            {nanny.rating.toFixed(1)} ({nanny.totalSessions} sessions)
+                            {nanny.rating.toFixed(1)} ({nanny.totalSessions})
                           </span>
                         </div>
                       </div>
@@ -354,7 +355,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
                     <div className="flex items-center gap-3 text-xs text-gray-500 mt-3 mb-3">
                       <span className="flex items-center gap-1">
                         <Briefcase className="h-3 w-3" />
-                        {nanny.experience} yrs exp
+                        {nanny.experience} yrs
                       </span>
                       <span className="flex items-center gap-1">
                         <Globe className="h-3 w-3" />
@@ -382,15 +383,24 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
 
                     {/* Actions */}
                     <div className="flex gap-2">
-                      {(nanny.isAvailable && nanny.user?.isOnline) && (
+                      {(nanny.isAvailable && nanny.user?.isOnline) ? (
                         <Button
                           size="sm"
-                          onClick={() => handleCallNow(nanny)}
-                          disabled={callingNanny === nanny.userId}
-                          className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-sm gap-1.5 h-8"
+                          onClick={() => handleJoinCall(nanny)}
+                          disabled={joiningNanny === nanny.userId}
+                          className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white text-sm gap-1.5 h-9"
                         >
-                          <Phone className="h-3.5 w-3.5" />
-                          {callingNanny === nanny.userId ? 'Calling...' : 'Call Now'}
+                          <Video className="h-3.5 w-3.5" />
+                          {joiningNanny === nanny.userId ? 'Connecting...' : 'Join'}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled
+                          className="flex-1 text-sm gap-1.5 h-9"
+                        >
+                          <Clock className="h-3.5 w-3.5" />
+                          Offline
                         </Button>
                       )}
                       <Button
@@ -400,7 +410,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
                           setSelectedNanny(nanny);
                           setScheduleOpen(true);
                         }}
-                        className="flex-1 border-rose-200 text-rose-600 hover:bg-rose-50 text-sm gap-1.5 h-8"
+                        className="flex-1 border-rose-200 text-rose-600 hover:bg-rose-50 text-sm gap-1.5 h-9"
                       >
                         <Calendar className="h-3.5 w-3.5" />
                         Schedule
@@ -412,7 +422,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
                           setProfileNanny(nanny);
                           setProfileOpen(true);
                         }}
-                        className="h-8 w-8 p-0 text-gray-400 hover:text-gray-600"
+                        className="h-9 w-9 p-0 text-gray-400 hover:text-gray-600"
                       >
                         <Eye className="h-3.5 w-3.5" />
                       </Button>
@@ -424,6 +434,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
           </AnimatePresence>
         </div>
       )}
+
       {/* Dialogs */}
       <ScheduleDialog
         open={scheduleOpen}
@@ -437,7 +448,7 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
         nanny={profileNanny}
         onCall={(nanny) => {
           setProfileOpen(false);
-          handleCallNow(nanny);
+          handleJoinCall(nanny);
         }}
         onSchedule={(nanny) => {
           setProfileOpen(false);

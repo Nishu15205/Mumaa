@@ -263,23 +263,34 @@ export default function Home() {
         socket.on('call-accepted', (data: any) => {
           const store = useAppStore.getState();
           if (store.currentCall && store.currentCall.id === data.callId) {
-            // The other party accepted — Jitsi detects the participant joining automatically
-            // Just show a toast so the user knows
             const otherName = user.role === 'PARENT'
               ? (store.currentCall.nannyName || 'Nanny')
               : (store.currentCall.parentName || 'Parent');
-            toast.success('Call Accepted', {
-              description: `${otherName} has joined the call.`,
-            });
+
+            // If parent was in waiting state, transition to actual video call
+            if (store.waitingForNanny) {
+              store.setWaitingForNanny(false);
+              toast.success(`${otherName} joined!`, {
+                description: 'Starting video call...',
+              });
+            } else {
+              toast.success('Call Accepted', {
+                description: `${otherName} has joined the call.`,
+              });
+            }
           }
         });
 
         socket.on('call-rejected', (data: any) => {
           const store = useAppStore.getState();
           if (store.currentCall && store.currentCall.id === data.callId) {
+            const otherName = user.role === 'PARENT'
+              ? (store.currentCall.nannyName || 'Nanny')
+              : (store.currentCall.parentName || 'Parent');
+            store.setWaitingForNanny(false);
             store.endCall();
-            toast.error('Call Declined', {
-              description: 'The other person declined your call.',
+            toast.error(`${otherName} declined`, {
+              description: 'The call was declined.',
             });
           }
         });

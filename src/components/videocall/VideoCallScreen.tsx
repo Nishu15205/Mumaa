@@ -6,14 +6,16 @@ import {
   PhoneOff,
   MessageSquare,
   ArrowLeft,
-  Copy,
   Check,
   Video,
   Users,
+  Clock,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAppStore } from '@/stores/app-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { CallTimer } from './CallTimer'
@@ -24,24 +26,30 @@ import { JitsiCall } from './JitsiCall'
 import type { JitsiCallHandle } from './JitsiCall'
 import { generateRoomName } from '@/lib/jitsi'
 
-type CallState = 'connecting' | 'active' | 'ended'
+type CallState = 'waiting' | 'connecting' | 'active' | 'ended'
+
+const WAIT_TIMEOUT_SECONDS = 5 * 60 // 5 minutes
 
 export function VideoCallScreen() {
-  const { currentCall, endCall } = useAppStore()
+  const { currentCall, endCall, waitingForNanny, setWaitingForNanny } = useAppStore()
   const { user } = useAuthStore()
 
-  const [callState, setCallState] = useState<CallState>('connecting')
+  const [callState, setCallState] = useState<CallState>(() =>
+    waitingForNanny ? 'waiting' : 'connecting'
+  )
   const [callStartTime, setCallStartTime] = useState<Date | null>(null)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [rating, setRating] = useState(0)
   const [reviewComment, setReviewComment] = useState('')
   const [isReviewSubmitting, setIsReviewSubmitting] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [otherPersonName, setOtherPersonName] = useState('')
   const [otherPersonId, setOtherPersonId] = useState('')
   const [participantCount, setParticipantCount] = useState(1)
   const [callDurationOnEnd, setCallDurationOnEnd] = useState(0)
   const [jitsiReady, setJitsiReady] = useState(false)
+
+  // Waiting countdown
+  const [waitSecondsLeft, setWaitSecondsLeft] = useState(WAIT_TIMEOUT_SECONDS)
 
   // Ref for JitsiCall component
   const jitsiRef = useRef<JitsiCallHandle>(null)
@@ -59,15 +67,65 @@ export function VideoCallScreen() {
     }
   }, [currentCall, user])
 
+  // 5-minute countdown timer for waiting state
+  useEffect(() => {
+    if (callState !== 'waiting') return
+
+    const interval = setInterval(() => {
+      setWaitSecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval)
+          // Auto-cancel after 5 minutes
+          handleCancelWait()
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [callState])
+
+  // Listen for nanny accepting the call (via socket events in page.tsx)
+  useEffect(() => {
+    if (callState !== 'waiting') return
+
+    const interval = setInterval(() => {
+      const store = useAppStore.getState()
+      // If waitingForNanny is set to false externally (by socket handler), transition
+      if (!store.waitingForNanny && store.currentCall) {
+        setWaitingForNanny(false)
+        setCallState('connecting')
+        toast.success(`${otherPersonName} joined the call!`)
+      }
+    }, 300)
+
+    return () => clearInterval(interval)
+  }, [callState, otherPersonName, setWaitingForNanny])
+
+  const handleCancelWait = useCallback(() => {
+    // Cancel the call request
+    if (currentCall) {
+      fetch(`/api/calls/${currentCall.id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'CANCELLED' }),
+      }).catch(() => {})
+    }
+    setWaitingForNanny(false)
+    endCall()
+    setCallState('waiting')
+    toast.info('Call cancelled', {
+      description: 'The nanny didn\'t join in time.',
+    })
+  }, [currentCall, endCall, setWaitingForNanny])
+
   // When Jitsi meeting is ready, transition to active state
   const handleMeetingReady = useCallback(() => {
     setJitsiReady(true)
     setCallState('active')
     setCallStartTime(new Date())
-    toast.success('Connected', {
-      description: `You're now in the call with ${otherPersonName}`,
-    })
-  }, [otherPersonName])
+  }, [])
 
   // Handle Jitsi call end
   const handleJitsiCallEnd = useCallback((durationSeconds: number) => {
@@ -76,7 +134,6 @@ export function VideoCallScreen() {
     setCallState('ended')
     setIsChatOpen(false)
 
-    // Persist call end to database
     if (currentCall) {
       persistCallEnd(currentCall.id, durationSeconds)
     }
@@ -88,41 +145,34 @@ export function VideoCallScreen() {
     toast.error('Call Error', {
       description: error,
     })
-    // If error is from user cancelling, go back
     if (error === 'User cancelled') {
       setJitsiReady(false)
       setCallState('ended')
       setCallDurationOnEnd(0)
       setTimeout(() => {
         endCall()
-        setCallState('connecting')
+        setCallState('waiting')
       }, 500)
     }
   }, [endCall])
 
-  // Persist call end to database via API
+  // Persist call end to database
   const persistCallEnd = useCallback(async (callId: string, durationSeconds: number) => {
     try {
-      const response = await fetch(`/api/calls/${callId}/end`, {
+      await fetch(`/api/calls/${callId}/end`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ duration: durationSeconds }),
       })
-
-      if (!response.ok) {
-        console.error('Failed to persist call end:', await response.text())
-      }
     } catch (error) {
       console.error('Failed to persist call end:', error)
     }
   }, [])
 
   const handleEndCall = useCallback(() => {
-    // Use the ref to call Jitsi's endCall
     if (jitsiRef.current) {
       jitsiRef.current.endCall()
     } else {
-      // Fallback: just transition to ended state
       setJitsiReady(false)
       const duration = callStartTime
         ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
@@ -153,9 +203,7 @@ export function VideoCallScreen() {
       })
 
       if (response.ok) {
-        toast.success('Review Submitted', {
-          description: 'Thank you for your feedback!',
-        })
+        toast.success('Review Submitted')
         setRating(0)
         setReviewComment('')
       } else {
@@ -165,9 +213,7 @@ export function VideoCallScreen() {
         })
       }
     } catch {
-      toast.error('Review Failed', {
-        description: 'Network error. Please try again.',
-      })
+      toast.error('Review Failed')
     } finally {
       setIsReviewSubmitting(false)
     }
@@ -175,46 +221,38 @@ export function VideoCallScreen() {
 
   const handleBackToDashboard = useCallback(() => {
     endCall()
-    setCallState('connecting')
+    setCallState('waiting')
     setRating(0)
     setReviewComment('')
     setCallStartTime(null)
     setCallDurationOnEnd(0)
     setParticipantCount(1)
     setJitsiReady(false)
-  }, [endCall])
-
-  const copyRoomId = useCallback(() => {
-    if (currentCall?.callRoomId) {
-      navigator.clipboard.writeText(currentCall.callRoomId)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-      toast.success('Room ID Copied', {
-        description: 'Share this ID with your call partner',
-      })
-    }
-  }, [currentCall])
+    setWaitSecondsLeft(WAIT_TIMEOUT_SECONDS)
+    setWaitingForNanny(false)
+  }, [endCall, setWaitingForNanny])
 
   // Don't render if no active call
   if (!currentCall) return null
 
-  // Build room name: use callRoomId directly if it already has the mumaa- prefix,
-  // otherwise generate from the call ID
   const roomName = currentCall.callRoomId
     ? (currentCall.callRoomId.startsWith('mumaa-')
         ? currentCall.callRoomId
         : generateRoomName(currentCall.callRoomId))
     : generateRoomName(currentCall.id)
 
-  // Calculate call duration for ended state
   const endedDuration = callDurationOnEnd || (callStartTime
     ? Math.floor((Date.now() - callStartTime.getTime()) / 1000)
     : 0)
   const endedMinutes = Math.floor(endedDuration / 60)
   const endedSeconds = endedDuration % 60
 
-  // Get user display name
+  // Format wait countdown
+  const waitMinutes = Math.floor(waitSecondsLeft / 60)
+  const waitSeconds = waitSecondsLeft % 60
+
   const displayName = user?.name || 'MUMAA User'
+  const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 
   return (
     <motion.div
@@ -224,12 +262,67 @@ export function VideoCallScreen() {
       className="fixed inset-0 z-[90] bg-gray-950 flex flex-col"
     >
       {/* ============================================================
-          JitsiCall is ALWAYS rendered (connecting + active states).
-          It loads in the background and fires onMeetingReady when
-          the Jitsi room is joined. The connecting UI is shown as an
-          overlay on top until Jitsi is ready.
+          WAITING STATE — Clean waiting screen with 5-min countdown
           ============================================================ */}
-      {callState !== 'ended' && (
+      <AnimatePresence>
+        {callState === 'waiting' && (
+          <motion.div
+            key="waiting"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950 p-4"
+          >
+            <div className="text-center">
+              {/* Nanny avatar */}
+              <motion.div
+                className="relative inline-block mb-6"
+                animate={{ scale: [1, 1.05, 1] }}
+                transition={{ duration: 2, repeat: Infinity }}
+              >
+                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto">
+                  <span className="text-3xl font-bold text-white">
+                    {getInitials(otherPersonName)}
+                  </span>
+                </div>
+                {/* Pulsing ring */}
+                <span className="absolute inset-0 rounded-full border-4 border-emerald-400/30 animate-ping" />
+              </motion.div>
+
+              {/* Nanny name */}
+              <h2 className="text-2xl font-bold text-white mb-1">{otherPersonName}</h2>
+
+              {/* Waiting status */}
+              <p className="text-gray-400 text-sm mb-6">Waiting for nanny to join...</p>
+
+              {/* Countdown timer */}
+              <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-sm mb-8">
+                <Clock className="w-4 h-4 text-amber-400" />
+                <span className="text-lg font-mono text-white font-medium">
+                  {String(waitMinutes).padStart(2, '0')}:{String(waitSeconds).padStart(2, '0')}
+                </span>
+              </div>
+
+              {/* Cancel button */}
+              <div>
+                <Button
+                  onClick={handleCancelWait}
+                  variant="outline"
+                  className="bg-white/10 text-white border-white/20 hover:bg-red-500/20 hover:border-red-400/40 hover:text-red-300 rounded-full px-8 h-11 text-sm"
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ============================================================
+          JitsiCall — ONLY rendered when connecting or active
+          ============================================================ */}
+      {callState !== 'waiting' && callState !== 'ended' && (
         <JitsiCall
           ref={jitsiRef}
           roomName={roomName}
@@ -244,7 +337,7 @@ export function VideoCallScreen() {
       )}
 
       {/* ============================================================
-          Connecting overlay - shown on top of JitsiCall while it loads
+          CONNECTING — Minimal overlay
           ============================================================ */}
       <AnimatePresence>
         {callState === 'connecting' && !jitsiReady && (
@@ -255,7 +348,6 @@ export function VideoCallScreen() {
             exit={{ opacity: 0 }}
             className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none"
           >
-            {/* Only the Cancel button is interactive */}
             <div className="absolute bottom-8 pointer-events-auto">
               <Button
                 onClick={handleBackToDashboard}
@@ -269,7 +361,7 @@ export function VideoCallScreen() {
 
             <VideoPlaceholder name={otherPersonName} size="full" />
 
-            {/* Pulse overlay */}
+            {/* Pulse ring */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <motion.div
                 animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0, 0.4] }}
@@ -278,28 +370,27 @@ export function VideoCallScreen() {
               />
             </div>
 
-            {/* Connecting info */}
+            {/* Connecting text — minimal */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <motion.div
                 animate={{ opacity: [0.6, 1, 0.6] }}
                 transition={{ duration: 1.5, repeat: Infinity }}
-                className="text-white/90 text-lg font-medium mb-2"
+                className="text-white text-xl font-medium"
               >
                 Connecting...
               </motion.div>
-              <p className="text-white/50 text-sm">Calling {otherPersonName}</p>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* ============================================================
-          Active call overlays (top bar, bottom controls, chat)
+          ACTIVE — Top bar + bottom controls + chat
           ============================================================ */}
       <AnimatePresence>
         {callState === 'active' && jitsiReady && (
           <>
-            {/* Top Bar Overlay */}
+            {/* Top Bar */}
             <motion.div
               key="topbar"
               initial={{ opacity: 0, y: -20 }}
@@ -318,27 +409,9 @@ export function VideoCallScreen() {
                   </span>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                {currentCall.callRoomId && (
-                  <button
-                    onClick={copyRoomId}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur-sm hover:bg-white/20 transition-colors"
-                  >
-                    <span className="text-[11px] text-white/60 font-mono">
-                      {roomName.length > 20 ? roomName.slice(0, 20) + '...' : roomName}
-                    </span>
-                    {copied ? (
-                      <Check className="w-3 h-3 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3 h-3 text-white/60" />
-                    )}
-                  </button>
-                )}
-              </div>
             </motion.div>
 
-            {/* Bottom Control Bar Overlay */}
+            {/* Bottom Controls */}
             <motion.div
               key="bottombar"
               initial={{ opacity: 0, y: 20 }}
@@ -356,7 +429,7 @@ export function VideoCallScreen() {
                       ? 'bg-rose-500 text-white'
                       : 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm'
                   }`}
-                  title="In-Call Chat"
+                  title="Chat"
                 >
                   <MessageSquare className="w-5 h-5" />
                 </motion.button>
@@ -375,7 +448,6 @@ export function VideoCallScreen() {
                 <motion.button
                   whileTap={{ scale: 0.9 }}
                   onClick={() => {
-                    // Use Jitsi API command to toggle camera
                     try {
                       const container = document.querySelector('[data-jitsi-container]')
                       if (container) {
@@ -389,14 +461,11 @@ export function VideoCallScreen() {
                     }
                   }}
                   className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm flex items-center justify-center transition-colors"
-                  title="Toggle Camera"
+                  title="Camera"
                 >
                   <Video className="w-5 h-5" />
                 </motion.button>
               </div>
-              <p className="text-white/30 text-[10px] mt-2">
-                Powered by MUMAA Video
-              </p>
             </motion.div>
 
             {/* Chat Panel */}
@@ -411,7 +480,7 @@ export function VideoCallScreen() {
       </AnimatePresence>
 
       {/* ============================================================
-          Ended state - call summary + review
+          ENDED — Call summary + review
           ============================================================ */}
       <AnimatePresence>
         {callState === 'ended' && (
@@ -428,48 +497,39 @@ export function VideoCallScreen() {
               transition={{ delay: 0.1 }}
               className="w-full max-w-md bg-gray-900 rounded-3xl p-8 shadow-2xl border border-gray-800"
             >
-              {/* Call summary */}
-              <div className="text-center mb-8">
+              {/* Summary */}
+              <div className="text-center mb-6">
                 <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-4">
                   <PhoneOff className="w-7 h-7 text-red-400" />
                 </div>
-                <h2 className="text-2xl font-bold text-white mb-1">Call Ended</h2>
-                <p className="text-gray-400 text-sm">
-                  with {otherPersonName}
-                </p>
-                <div className="mt-3 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gray-800">
-                  <span className="text-sm text-gray-300 font-mono">
-                    {String(endedMinutes).padStart(2, '0')}:{String(endedSeconds).padStart(2, '0')}
-                  </span>
-                  <span className="text-xs text-gray-500">duration</span>
-                </div>
+                <h2 className="text-xl font-bold text-white mb-1">Call Ended</h2>
+                <p className="text-gray-400 text-sm">{otherPersonName}</p>
+                {endedDuration > 0 && (
+                  <div className="mt-2 inline-flex items-center gap-2 px-4 py-1 rounded-full bg-gray-800">
+                    <span className="text-sm text-gray-300 font-mono">
+                      {String(endedMinutes).padStart(2, '0')}:{String(endedSeconds).padStart(2, '0')}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Divider */}
-              <div className="border-t border-gray-800 mb-6" />
+              <div className="border-t border-gray-800 mb-5" />
 
-              {/* Rate this call */}
-              <div className="text-center mb-6">
-                <h3 className="text-base font-semibold text-white mb-1">Rate this call</h3>
-                <p className="text-xs text-gray-500 mb-4">How was your experience?</p>
+              {/* Rate */}
+              <div className="text-center mb-4">
+                <p className="text-sm text-gray-400 mb-3">Rate this call</p>
                 <div className="flex justify-center">
-                  <StarRating
-                    value={rating}
-                    onChange={setRating}
-                    size="lg"
-                  />
+                  <StarRating value={rating} onChange={setRating} size="lg" />
                 </div>
               </div>
 
-              {/* Comment */}
               <Textarea
                 value={reviewComment}
                 onChange={(e) => setReviewComment(e.target.value)}
-                placeholder="Share your thoughts about this call..."
-                className="bg-gray-800 border-gray-700 text-white placeholder-gray-500 text-sm resize-none h-24 rounded-xl focus:ring-rose-500/30 focus:border-rose-500/50 mb-4"
+                placeholder="Share your thoughts..."
+                className="bg-gray-800 border-gray-700 text-white placeholder-gray-500 text-sm resize-none h-20 rounded-xl focus:ring-rose-500/30 focus:border-rose-500/50 mb-4"
               />
 
-              {/* Submit review */}
               <Button
                 onClick={handleSubmitReview}
                 disabled={!rating || isReviewSubmitting}
@@ -478,7 +538,6 @@ export function VideoCallScreen() {
                 {isReviewSubmitting ? 'Submitting...' : 'Submit Review'}
               </Button>
 
-              {/* Back to dashboard */}
               <Button
                 onClick={handleBackToDashboard}
                 variant="outline"

@@ -10,6 +10,7 @@ interface AppState {
   showVideoCall: boolean;
   currentCall: CallSession | null;
   incomingCall: IncomingCall | null;
+  waitingForNanny: boolean;
 }
 
 interface AppActions {
@@ -20,6 +21,7 @@ interface AppActions {
   startCall: (call: CallSession) => void;
   endCall: () => void;
   setIncomingCall: (call: IncomingCall | null) => void;
+  setWaitingForNanny: (waiting: boolean) => void;
 }
 
 export const useAppStore = create<AppState & AppActions>()((set) => ({
@@ -29,6 +31,7 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
   showVideoCall: false,
   currentCall: null,
   incomingCall: null,
+  waitingForNanny: false,
 
   setCurrentView: (currentView) => set({ currentView }),
 
@@ -44,13 +47,17 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
       currentCall: call,
       showVideoCall: true,
       incomingCall: null,
+      waitingForNanny: false,
     }),
 
   endCall: () =>
     set({
       currentCall: null,
       showVideoCall: false,
+      waitingForNanny: false,
     }),
 
   setIncomingCall: (incomingCall) => set({ incomingCall }),
+
+  setWaitingForNanny: (waiting) => set({ waitingForNanny: waiting }),
 }));

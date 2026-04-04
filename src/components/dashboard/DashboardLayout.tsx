@@ -131,7 +131,7 @@ export default function DashboardLayout({ children, activePage = 'dashboard', on
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
-      {/* Mobile overlay */}
+      {/* Mobile overlay - only on small screens */}
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -144,13 +144,11 @@ export default function DashboardLayout({ children, activePage = 'dashboard', on
         )}
       </AnimatePresence>
 
-      {/* Sidebar */}
-      <motion.aside
-        initial={false}
-        animate={{ x: sidebarOpen ? 0 : -280 }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+      {/* Sidebar - always visible on desktop, slide on mobile */}
+      <aside
         className={cn(
-          'fixed lg:relative z-50 lg:z-auto h-full w-[260px] bg-white border-r border-gray-200 flex flex-col shrink-0',
+          'fixed lg:sticky top-0 z-50 lg:z-auto h-screen w-[260px] bg-white border-r border-gray-200 flex flex-col shrink-0 transition-transform duration-300 ease-in-out',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           'lg:translate-x-0'
         )}
       >
@@ -235,7 +233,7 @@ export default function DashboardLayout({ children, activePage = 'dashboard', on
             Log out
           </button>
         </div>
-      </motion.aside>
+      </aside>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
