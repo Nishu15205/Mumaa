@@ -9,7 +9,6 @@
 export function getSecurityHeaders(): Record<string, string> {
   return {
     'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Content-Security-Policy':
@@ -19,7 +18,6 @@ export function getSecurityHeaders(): Record<string, string> {
       "img-src 'self' data: blob: https:; " +
       "font-src 'self' data:; " +
       "connect-src 'self' ws: wss: https:; " +
-      "frame-ancestors 'none'; " +
       "base-uri 'self'; " +
       "form-action 'self'",
     'Permissions-Policy':

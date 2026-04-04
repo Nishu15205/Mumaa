@@ -107,14 +107,10 @@ export default function Home() {
 
   // Mark as mounted and ensure loading is false after hydration
   useEffect(() => {
+    // Immediately mark mounted
     setMounted(true);
-    // Safety: force loading false after mount regardless of store state
-    const timer = setTimeout(() => {
-      if (useAuthStore.getState().isLoading) {
-        useAuthStore.getState().setLoading(false);
-      }
-    }, 500);
-    return () => clearTimeout(timer);
+    // Immediately force loading false - the store will rehydrate from localStorage
+    useAuthStore.setState({ isLoading: false });
   }, []);
 
   // Sync activeTab with dashboardPage
@@ -218,7 +214,7 @@ export default function Home() {
     };
   }, [isAuthenticated, user?.id]);
 
-  if (!mounted || isLoading) {
+  if (!mounted) {
     return <LoadingScreen />;
   }
 

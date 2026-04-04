@@ -23,7 +23,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
     (set) => ({
       user: null,
       isAuthenticated: false,
-      isLoading: true,
+      isLoading: false,
       subscription: null,
 
       setUser: (user) =>
