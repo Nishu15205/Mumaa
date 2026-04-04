@@ -102,8 +102,16 @@ export default function Home() {
   const [dashboardPage, setDashboardPage] = useState('dashboard');
   const [mounted, setMounted] = useState(false);
 
+  // Mark as mounted and ensure loading is false after hydration
   useEffect(() => {
     setMounted(true);
+    // Safety: force loading false after mount regardless of store state
+    const timer = setTimeout(() => {
+      if (useAuthStore.getState().isLoading) {
+        useAuthStore.getState().setLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
   }, []);
 
   // Sync activeTab with dashboardPage

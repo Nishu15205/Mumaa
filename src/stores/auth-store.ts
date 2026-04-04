@@ -54,6 +54,13 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         isAuthenticated: state.isAuthenticated,
         subscription: state.subscription,
       }),
+      onRehydrateStorage: () => {
+        return (_state, error) => {
+          if (!error) {
+            useAuthStore.setState({ isLoading: false });
+          }
+        };
+      },
     }
   )
 );
