@@ -2,141 +2,197 @@
 // MUMAA Platform - Service Worker for Push Notifications
 // ============================================================
 
-const CACHE_NAME = 'mumaa-push-v1';
+const CACHE_NAME = 'mumaa-push-v2';
 
-// Install event - self-registration
+// Default icon paths (rose/pink MUMAA branding)
+const MUMAA_ICON = '/logo.svg';
+const MUMAA_BADGE = '/logo.svg';
+
+// Install — activate immediately, don't wait for old SW to die
 self.addEventListener('install', (event) => {
-  console.log('[MUMAA SW] Service Worker installed');
+  console.log('[MUMAA SW] Installing...');
   event.waitUntil(self.skipWaiting());
 });
 
-// Activate event - clean old caches and take control
+// Activate — clean stale caches and claim every open tab
 self.addEventListener('activate', (event) => {
-  console.log('[MUMAA SW] Service Worker activated');
+  console.log('[MUMAA SW] Activating...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name.startsWith('mumaa-') && name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter((n) => n.startsWith('mumaa-') && n !== CACHE_NAME)
+            .map((n) => caches.delete(n))
+        )
+      )
+      .then(() => self.clients.claim())
   );
 });
 
-// Push event - show notification
+// Push — show a notification with rich content
 self.addEventListener('push', (event) => {
-  console.log('[MUMAA SW] Push event received');
+  // Ignore push events with no data (some browsers fire a blank one)
+  if (!event.data) {
+    event.waitUntil(
+      self.registration.showNotification('MUMAA', {
+        body: 'You have a new notification.',
+        icon: MUMAA_ICON,
+        badge: MUMAA_BADGE,
+      })
+    );
+    return;
+  }
 
   let payload;
 
-  if (event.data) {
-    try {
-      payload = event.data.json();
-    } catch {
-      payload = {
-        title: 'MUMAA Notification',
-        body: event.data.text() || 'You have a new notification.',
-      };
-    }
-  } else {
+  try {
+    payload = event.data.json();
+  } catch {
+    // Server sent plain text instead of JSON — use it as the body
+    const text = event.data.text();
     payload = {
-      title: 'MUMAA Notification',
-      body: 'You have a new notification.',
+      title: 'MUMAA',
+      body: text || 'You have a new notification.',
     };
   }
 
-  const notificationOptions = {
+  const isCall = payload.type === 'CALL_REQUEST';
+
+  const options = {
     body: payload.body || '',
-    icon: payload.icon || '/logo.svg',
-    badge: payload.badge || '/logo.svg',
+    icon: payload.icon || MUMAA_ICON,
+    badge: payload.badge || MUMAA_BADGE,
     image: payload.image || undefined,
-    tag: payload.tag || undefined,
-    data: payload.data || {},
+    tag: payload.tag || 'mumaa-notification',
+    data: {
+      ...payload.data,
+      url: payload.data?.url || '/',
+      type: payload.type || 'SYSTEM',
+    },
     requireInteraction: payload.requireInteraction || false,
-    vibrate: payload.type === 'CALL_REQUEST' ? [200, 100, 200, 100, 200, 100, 200] : [100, 50, 100],
+    // Urgent vibration for incoming calls; gentle tap for everything else
+    vibrate: isCall ? [300, 150, 300, 150, 300] : [100],
     actions: payload.actions || undefined,
+    // Add a subtle rose tint via renotify (new notification replaces old one with same tag)
+    renotify: true,
   };
 
-  // For incoming calls, add special actions
-  if (payload.type === 'CALL_REQUEST') {
-    notificationOptions.actions = [
+  // Incoming calls get special treatment
+  if (isCall) {
+    options.actions = [
       { action: 'accept', title: 'Accept Call' },
       { action: 'decline', title: 'Decline' },
     ];
-    notificationOptions.requireInteraction = true;
+    options.requireInteraction = true;
+    // Ensure call notifications always show even if one with same tag exists
+    options.tag = payload.tag || `call-${payload.data?.callId || Date.now()}`;
   }
 
+  const title = payload.title || 'MUMAA Notification';
+
   event.waitUntil(
-    self.registration.showNotification(payload.title || 'MUMAA Notification', notificationOptions)
+    self.registration.showNotification(title, options)
   );
 });
 
-// Notification click event - handle user interaction
+// Notification click — focus existing window, open a new one, or handle actions
 self.addEventListener('notificationclick', (event) => {
-  console.log('[MUMAA SW] Notification clicked:', event.action);
-
   event.notification.close();
 
-  const notificationData = event.notification.data || {};
-  const clickUrl = notificationData.url || '/';
+  const data = event.notification.data || {};
+  const url = data.url || '/';
 
-  if (event.action === 'accept') {
-    // User accepted the call - open the app with call context
-    handleCallAction('accept', notificationData);
-  } else if (event.action === 'decline') {
-    // User declined the call
-    handleCallAction('decline', notificationData);
-  } else {
-    // Default click - open or focus the app
-    event.waitUntil(
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-        // Focus existing window if available
-        for (const client of clientList) {
-          if (client.url.includes(self.location.origin) && 'focus' in client) {
-            return client.focus();
-          }
-        }
-        // Open new window
-        if (self.clients.openWindow) {
-          return self.clients.openWindow(clickUrl);
-        }
-        return null;
-      })
-    );
+  // Handle in-app action buttons (accept / decline)
+  if (event.action === 'accept' || event.action === 'decline') {
+    handleCallAction(event.action, data);
+    return;
+  }
+
+  // Default click — focus the app or open a new tab
+  event.waitUntil(
+    openOrFocus(url)
+  );
+});
+
+// Notification close (user swiped it away)
+self.addEventListener('notificationclose', (event) => {
+  const data = event.notification.data || {};
+
+  // If a call notification was dismissed, let the app know so it can clean up
+  if (data.type === 'CALL_REQUEST' && data.callId) {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        client.postMessage({
+          type: 'PUSH_CALL_DISMISSED',
+          callId: data.callId,
+        });
+      }
+    });
   }
 });
 
-// Handle call accept/decline actions
+// Allow the main thread to tell this SW to skip waiting
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+// ── Helpers ────────────────────────────────────────────────────
+
+/**
+ * Try to focus an existing MUMAA tab; if none exist, open a new one.
+ */
+function openOrFocus(url) {
+  return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    // Prefer a client that is already on the same origin
+    for (const client of clients) {
+      if (client.url.includes(self.location.origin) && 'focus' in client) {
+        return client.focus();
+      }
+    }
+
+    // No suitable window — open one
+    if (self.clients.openWindow) {
+      return self.clients.openWindow(url);
+    }
+
+    return null;
+  });
+}
+
+/**
+ * Handle accept/decline call actions from notification buttons.
+ * Posts a message to the app window and opens it if needed.
+ */
 function handleCallAction(action, data) {
   const callId = data.callId;
-
-  // Open the app with call context
   const url = callId ? `/?call=${callId}&action=${action}` : '/';
 
-  self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-    for (const client of clientList) {
+  self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    let found = false;
+
+    for (const client of clients) {
       if (client.url.includes(self.location.origin) && 'focus' in client) {
-        // Post message to the focused window about the call action
+        // Let the app handle the action in-band
         client.postMessage({
           type: 'PUSH_CALL_ACTION',
           action,
           callId,
         });
-        return client.focus();
+        client.focus();
+        found = true;
+        break;
       }
     }
-    // No existing window, open a new one
-    if (self.clients.openWindow) {
+
+    // No open window — open one with action params in the URL
+    if (!found && self.clients.openWindow) {
       return self.clients.openWindow(url);
     }
+
     return null;
   });
 }
-
-// Listen for messages from the main thread
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});

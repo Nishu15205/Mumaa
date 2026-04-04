@@ -10,7 +10,6 @@ function formatDateForGroup(date: Date, period: string): string {
     case 'daily':
       return `${y}-${m}-${d}`;
     case 'weekly': {
-      // Get the start of the week (Monday)
       const day = date.getDay();
       const diff = date.getDate() - day + (day === 0 ? -6 : 1);
       const weekStart = new Date(date);
@@ -27,6 +26,22 @@ function formatDateForGroup(date: Date, period: string): string {
   }
 }
 
+function formatLabelForPeriod(dateStr: string, period: string): string {
+  // Turn "2025-01-15" or "2025-01" into shorter display labels
+  if (period === 'monthly') {
+    const parts = dateStr.split('-');
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return monthNames[parseInt(parts[1], 10) - 1] || parts[1];
+  }
+  if (period === 'weekly') {
+    const parts = dateStr.split('-');
+    return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+  }
+  // daily: show "Jan 15" format
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
@@ -40,7 +55,7 @@ export async function GET(request: NextRequest) {
     const startDate = from ? new Date(from) : sixMonthsAgo;
     const endDate = to ? new Date(to + 'T23:59:59:999Z') : now;
 
-    const dateFilter: any = {
+    const dateFilter: Record<string, unknown> = {
       createdAt: { gte: startDate, lte: endDate },
     };
 
@@ -49,6 +64,7 @@ export async function GET(request: NextRequest) {
       totalUsers,
       parentCount,
       nannyCount,
+      adminCount,
       allActiveSubscriptions,
       freeSubCount,
       basicSubCount,
@@ -69,6 +85,7 @@ export async function GET(request: NextRequest) {
       recentActivity,
       callHourData,
       retentionData,
+      callDurationData,
     ] = await Promise.all([
       // Total users (non-admin)
       db.user.count({
@@ -77,6 +94,7 @@ export async function GET(request: NextRequest) {
 
       db.user.count({ where: { role: 'PARENT' } }),
       db.user.count({ where: { role: 'NANNY' } }),
+      db.user.count({ where: { role: 'ADMIN' } }),
 
       // Active subscriptions
       db.subscription.count({ where: { status: 'ACTIVE' } }),
@@ -191,13 +209,20 @@ export async function GET(request: NextRequest) {
         _count: { id: true },
         where: { status: 'COMPLETED' },
       }),
+
+      // Call durations for distribution
+      db.callSession.findMany({
+        where: { status: 'COMPLETED', duration: { gt: 0 } },
+        select: { duration: true },
+        take: 2000,
+      }),
     ]);
 
     // Process user growth data grouped by period
     const usersInRange = await db.user.findMany({
       where: {
         role: { in: ['PARENT', 'NANNY'] },
-        ...dateFilter,
+        createdAt: { gte: startDate, lte: endDate },
       },
       select: { createdAt: true, role: true },
     });
@@ -214,8 +239,9 @@ export async function GET(request: NextRequest) {
 
     const userGrowthData = Array.from(userGrowthMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([period_key, val]) => ({
-        period: period_key,
+      .map(([periodKey, val]) => ({
+        period: periodKey,
+        label: formatLabelForPeriod(periodKey, period),
         parents: val.parents,
         nannies: val.nannies,
         total: val.total,
@@ -223,7 +249,7 @@ export async function GET(request: NextRequest) {
 
     // Process revenue over time
     const completedCallsInRange = await db.callSession.findMany({
-      where: { status: 'COMPLETED', ...dateFilter },
+      where: { status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } },
       select: { createdAt: true, price: true },
     });
 
@@ -235,14 +261,15 @@ export async function GET(request: NextRequest) {
 
     const revenueData = Array.from(revenueMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([period_key, amount]) => ({
-        period: period_key,
+      .map(([periodKey, amount]) => ({
+        period: periodKey,
+        label: formatLabelForPeriod(periodKey, period),
         revenue: Math.round(amount * 100) / 100,
       }));
 
     // Process call volume over time
     const callsInRange = await db.callSession.findMany({
-      where: { ...dateFilter },
+      where: { createdAt: { gte: startDate, lte: endDate } },
       select: { createdAt: true, status: true },
     });
 
@@ -258,8 +285,9 @@ export async function GET(request: NextRequest) {
 
     const callVolumeData = Array.from(callVolumeMap.entries())
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([period_key, val]) => ({
-        period: period_key,
+      .map(([periodKey, val]) => ({
+        period: periodKey,
+        label: formatLabelForPeriod(periodKey, period),
         completed: val.completed,
         cancelled: val.cancelled,
         total: val.total,
@@ -277,6 +305,29 @@ export async function GET(request: NextRequest) {
       hour: `${String(hour).padStart(2, '0')}:00`,
       calls: count,
     }));
+
+    // Call duration distribution
+    const durationBuckets = [
+      { range: '0-5 min', min: 0, max: 300, color: '#fca5a5' },
+      { range: '5-15 min', min: 300, max: 900, color: '#f87171' },
+      { range: '15-30 min', min: 900, max: 1800, color: '#ef4444' },
+      { range: '30-60 min', min: 1800, max: 3600, color: '#dc2626' },
+      { range: '60+ min', min: 3600, max: Infinity, color: '#b91c1c' },
+    ];
+    const callDurationDistribution = durationBuckets.map((bucket) => ({
+      range: bucket.range,
+      count: callDurationData.filter(
+        (c) => c.duration >= bucket.min && c.duration < bucket.max
+      ).length,
+      color: bucket.color,
+    }));
+
+    // User role distribution
+    const userRoleDistribution = [
+      { name: 'Parents', value: parentCount, color: '#f43f5e' },
+      { name: 'Nannies', value: nannyCount, color: '#10b981' },
+      { name: 'Admins', value: adminCount, color: '#6366f1' },
+    ].filter((d) => d.value > 0);
 
     // Retention metrics
     const usersWithMultipleCalls = retentionData.filter((r) => r._count.id >= 2);
@@ -302,22 +353,22 @@ export async function GET(request: NextRequest) {
       : 0;
 
     // Calls this month
-    const callsThisMonth = completedCalls - (
-      await db.callSession.count({
-        where: {
-          status: 'COMPLETED',
-          createdAt: {
-            lt: new Date(now.getFullYear(), now.getMonth(), 1),
-          },
+    const callsCompletedBeforeThisMonth = await db.callSession.count({
+      where: {
+        status: 'COMPLETED',
+        createdAt: {
+          lt: new Date(now.getFullYear(), now.getMonth(), 1),
         },
-      })
-    );
+      },
+    });
+    const callsThisMonth = completedCalls - callsCompletedBeforeThisMonth;
 
     return NextResponse.json({
       overview: {
         totalUsers,
         parentCount,
         nannyCount,
+        adminCount,
         activeSubscriptions: allActiveSubscriptions,
         freeSubscriptions: freeSubCount,
         basicSubscriptions: basicSubCount,
@@ -330,7 +381,7 @@ export async function GET(request: NextRequest) {
         conversionRate,
         avgCallDuration: avgDurationResult._avg.duration || 0,
         avgRating: avgRating._avg.rating || 0,
-        callsThisMonth,
+        callsThisMonth: Math.max(callsThisMonth, 0),
         retentionRate,
       },
       callStats: {
@@ -342,7 +393,7 @@ export async function GET(request: NextRequest) {
         noShow: totalCallsAll - completedCalls - cancelledCalls - activeCalls - pendingCalls,
       },
       subscriptionDistribution: [
-        { name: 'FREE', value: freeSubCount, color: '#9ca3af' },
+        { name: 'FREE', value: freeSubCount, color: '#d1d5db' },
         { name: 'BASIC', value: basicSubCount, color: '#f43f5e' },
         { name: 'PRO', value: proSubCount, color: '#10b981' },
       ],
@@ -352,6 +403,8 @@ export async function GET(request: NextRequest) {
         { name: 'Active', value: activeCalls, color: '#3b82f6' },
         { name: 'Pending', value: pendingCalls, color: '#f59e0b' },
       ],
+      userRoleDistribution,
+      callDurationDistribution,
       userGrowthData,
       revenueData,
       callVolumeData,
@@ -372,7 +425,7 @@ export async function GET(request: NextRequest) {
         timestamp: u.createdAt.toISOString(),
       })),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Get analytics error:', error);
     return NextResponse.json(
       { error: 'Failed to fetch analytics' },
