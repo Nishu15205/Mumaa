@@ -26,9 +26,9 @@ export const PRICING_PLANS: PricingPlan[] = [
     trialDays: 7,
     popular: true,
     features: [
-      '5 instant calls per day',
+      '4 instant calls per day',
       'Unlimited scheduled calls',
-      '30-minute max call duration',
+      '15-minute max call duration',
       'Priority support',
       'Call recording',
       'HD video quality',
@@ -79,13 +79,13 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export const MAX_CALL_DURATION: Record<string, number> = {
   FREE: 15 * 60,    // 15 minutes in seconds
-  BASIC: 30 * 60,   // 30 minutes in seconds
+  BASIC: 15 * 60,   // 15 minutes in seconds
   PRO: 60 * 60,     // 60 minutes in seconds
 };
 
 export const INSTANT_CALL_LIMITS: Record<string, number> = {
   FREE: 1,
-  BASIC: 5,
+  BASIC: 4,
   PRO: Infinity,
 };
 
@@ -94,3 +94,6 @@ export const SCHEDULED_CALL_LIMITS: Record<string, number> = {
   BASIC: Infinity,
   PRO: Infinity,
 };
+
+// 30 days in ms — used for 1-month free trial for newly approved nannies
+export const NANNY_FREE_TRIAL_DAYS = 30;

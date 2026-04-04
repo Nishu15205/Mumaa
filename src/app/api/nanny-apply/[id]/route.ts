@@ -125,9 +125,9 @@ export async function PUT(
       },
     });
 
-    // 3) Create FREE subscription with 7-day trial
+    // 3) Create FREE subscription with 30-day trial (1 month free)
     const trialEndsAt = new Date();
-    trialEndsAt.setDate(trialEndsAt.getDate() + 7);
+    trialEndsAt.setDate(trialEndsAt.getDate() + 30);
 
     await db.subscription.create({
       data: {

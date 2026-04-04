@@ -262,3 +262,32 @@ Stage Summary:
 - Basic plan: 5 free calls/day, each max 15 minutes
 - PRO plan: unlimited calls, unlimited duration
 - FREE plan: no instant calls (upgrade required)
+---
+Task ID: 1
+Agent: Main Agent
+Task: Implement user changes - Basic plan 4 calls/day, nanny bank details, 1 month free trial, remove seed data
+
+Work Log:
+- Updated Prisma schema: Added bankName, accountNumber, ifscCode, accountHolder, upiId to NannyProfile model
+- Ran db:push to sync schema, reset database to clean state
+- Updated PRICING_PLANS in constants.ts: Basic plan changed to "4 instant calls per day" and "15-minute max call duration"
+- Updated MAX_CALL_DURATION: BASIC now 15 min (was 30 min)
+- Updated INSTANT_CALL_LIMITS: BASIC now 4 (was 5)
+- Added NANNY_FREE_TRIAL_DAYS = 30 constant
+- Removed all fake seed data from seed/route.ts - now only creates admin@mumaa.in account
+- Updated NannyProfile type in types/index.ts with bank detail fields
+- Updated nanny-apply/[id]/route.ts: Trial period changed from 7 days to 30 days
+- Created API route: /api/nannies/bank-details/route.ts (PUT - update bank details)
+- Created NannyBankDetails component with free trial banner, bank details form, security note
+- Added 'bank' case to NannyDashboardRouter in page.tsx
+- Added "Bank Details" nav item with Landmark icon to nannyNav in DashboardLayout
+- Updated navLabels array to include 'bank' for nanny role
+- Seeded fresh database with only admin account
+
+Stage Summary:
+- Basic plan now: 4 calls/day, 15 min max duration
+- Nanny bank details page added to nanny dashboard sidebar
+- All approved nannies get 30-day free trial (1 month)
+- Database is clean - no fake/seed data, only admin account
+- Nanny earnings already shows ₹0 until admin pays (was already implemented)
+- Apply as Nanny feature already existed (no changes needed)

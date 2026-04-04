@@ -49,7 +49,13 @@ model NannyProfile {
   languages     String   @default("")
   certifications String  @default("")
   ageGroup      String   @default("")
-  createdAt     DateTime @default(now())
+  // Bank Details for payment
+  bankName      String   @default("")
+  accountNumber String   @default("")
+  ifscCode      String   @default("")
+  accountHolder String   @default("")
+  upiId         String   @default("")
+ createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -40,6 +40,11 @@ export interface NannyProfile {
   languages: string;
   certifications: string;
   ageGroup: string;
+  bankName: string;
+  accountNumber: string;
+  ifscCode: string;
+  accountHolder: string;
+  upiId: string;
   createdAt: string;
   updatedAt: string;
   user?: User;

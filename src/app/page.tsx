@@ -23,6 +23,7 @@ import SubscriptionPage from '@/components/dashboard/parent/SubscriptionPage';
 import NannyDashboard from '@/components/dashboard/nanny/NannyDashboard';
 import NannyCalls from '@/components/dashboard/nanny/NannyCalls';
 import NannyEarnings from '@/components/dashboard/nanny/NannyEarnings';
+import NannyBankDetails from '@/components/dashboard/nanny/NannyBankDetails';
 
 import AdminDashboard from '@/components/dashboard/admin/AdminDashboard';
 import AdminAnalytics from '@/components/dashboard/admin/AdminAnalytics';
@@ -81,6 +82,8 @@ function NannyDashboardRouter({ activePage }: { activePage: string }) {
       return <NannyDashboard />;
     case 'earnings':
       return <NannyEarnings />;
+    case 'bank':
+      return <NannyBankDetails />;
     case 'settings':
       return <Settings />;
     default:
