@@ -68,10 +68,52 @@ const onlineUserInfo = new Map<string, OnlineUser>()
 
 // ─── HTTP & Socket.IO Server ───────────────────────────────────────────────
 
-const httpServer = createServer()
+const httpServer = createServer((req, res) => {
+  // ─── HTTP API for server-to-server event emission ───────────────
+  if (req.method === 'POST' && req.url === '/emit') {
+    let body = ''
+    req.on('data', (chunk) => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { toUserId, event, data } = JSON.parse(body)
+        if (!toUserId || !event) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'toUserId and event are required' }))
+          return
+        }
+
+        const target = getSocketByUserId(toUserId)
+        if (target) {
+          target.emit(event, data || {})
+          console.log(`[http-emit] -> ${event} to ${toUserId}`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, delivered: true }))
+        } else {
+          console.log(`[http-emit] -> ${event} to ${toUserId} FAILED (offline)`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, delivered: false, reason: 'user_offline' }))
+        }
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      }
+    })
+    return
+  }
+
+  // Health check
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ status: 'ok', onlineUsers: onlineUsers.size, port: PORT }))
+    return
+  }
+
+  res.writeHead(404)
+  res.end('Not Found')
+})
 
 const io = new Server(httpServer, {
-  path: '/',
+  path: '/socket.io',
   cors: {
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

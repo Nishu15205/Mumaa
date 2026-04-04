@@ -8,6 +8,7 @@ import {
   getJitsiScriptSrc,
   JITSI_CONFIG_OVERWRITE,
   JITSI_EVENTS,
+  JITSI_DOMAIN,
 } from '@/lib/jitsi'
 
 type JitsiAPI = unknown
@@ -135,7 +136,7 @@ export function JitsiCall({
       }
 
       // Create the meeting instance
-      const api = new JitsiMeetExternalAPI('meet.jit.si', {
+      const api = new JitsiMeetExternalAPI(JITSI_DOMAIN, {
         roomName,
         parentNode: containerRef.current,
         configOverwrite: {

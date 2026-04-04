@@ -94,14 +94,48 @@ export default function FindNannies({ onViewProfile, onSchedule }: {
 
   const handleCallNow = async (nanny: NannyWithUser) => {
     if (!user || !nanny.userId) return;
+
+    // Prevent double-clicking
+    const { currentCall } = useAppStore.getState();
+    if (currentCall) {
+      toast.error('You already have an active call. Please end it first.');
+      return;
+    }
+
     try {
       setCallingNanny(nanny.userId);
-      const res = await apiPost<{ call: CallSession }>('/api/calls/instant', {
+      const res = await apiPost<{ call: any }>('/api/calls/instant', {
         parentId: user.id,
         nannyId: nanny.userId,
       });
-      toast.success('Call request sent!');
-      startCall(res.call);
+
+      // Flatten nested parent/nanny data into flat CallSession shape
+      const rawCall = res.call;
+      const flatCall: CallSession = {
+        id: rawCall.id,
+        parentId: rawCall.parentId,
+        nannyId: rawCall.nannyId,
+        parentName: rawCall.parent?.name || user.name,
+        nannyName: rawCall.nanny?.name || nanny.user?.name || 'Nanny',
+        parentAvatar: rawCall.parent?.avatar || null,
+        nannyAvatar: rawCall.nanny?.avatar || null,
+        type: rawCall.type,
+        status: rawCall.status,
+        scheduledAt: rawCall.scheduledAt,
+        startedAt: rawCall.startedAt,
+        endedAt: rawCall.endedAt,
+        duration: rawCall.duration || 0,
+        price: rawCall.price || 0,
+        notes: rawCall.notes,
+        callRoomId: rawCall.callRoomId,
+        rating: rawCall.rating,
+        reviewComment: rawCall.reviewComment,
+        createdAt: rawCall.createdAt,
+        updatedAt: rawCall.updatedAt,
+      };
+
+      toast.success('Call request sent! Waiting for nanny...');
+      startCall(flatCall);
     } catch {
       toast.error('Failed to start call. The nanny may be offline.');
     } finally {

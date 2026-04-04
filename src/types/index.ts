@@ -180,4 +180,5 @@ export interface IncomingCall {
   callerName: string;
   callerAvatar: string | null;
   type: CallType;
+  callRoomId?: string | null;
 }

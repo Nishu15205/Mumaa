@@ -43,6 +43,17 @@ export async function POST(req: NextRequest) {
 
     const plan = subscription?.plan || 'FREE';
 
+    // FREE plan users cannot make instant calls
+    if (plan === 'FREE') {
+      return NextResponse.json(
+        {
+          error: 'Instant calls require a paid plan. Please upgrade to Basic or Pro to start making calls.',
+          code: 'UPGRADE_REQUIRED',
+        },
+        { status: 403 }
+      );
+    }
+
     if (plan === 'BASIC') {
       // Check daily call limit
       const now = new Date();
@@ -123,6 +134,29 @@ export async function POST(req: NextRequest) {
         data: JSON.stringify({ callId: call.id, callRoomId }),
       },
     });
+
+    // Notify nanny via socket service (real-time ringing)
+    try {
+      const SOCKET_PORT = process.env.SOCKET_PORT || 3003;
+      await fetch(`http://localhost:${SOCKET_PORT}/emit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toUserId: nannyId,
+          event: 'incoming-call',
+          data: {
+            callId: call.id,
+            callerId: parentId,
+            callerName: parent.name,
+            callerAvatar: parent.avatar,
+            callType: 'INSTANT',
+            callRoomId: call.callRoomId,
+          },
+        }),
+      });
+    } catch (socketErr) {
+      console.warn('[Instant Call] Could not notify via socket, falling back to DB notification only:', socketErr);
+    }
 
     return NextResponse.json(
       {

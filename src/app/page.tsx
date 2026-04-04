@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import { useNotificationStore } from '@/stores/notification-store';
 import { apiGet } from '@/lib/api';
+import { toast } from 'sonner';
 
 import LandingPage from '@/components/landing/LandingPage';
 import LoginForm from '@/components/auth/LoginForm';
@@ -234,6 +235,7 @@ export default function Home() {
       try {
         const { io } = await import('socket.io-client');
         socket = io('/?XTransformPort=3003', {
+          path: '/socket.io',
           transports: ['websocket', 'polling'],
           reconnection: true,
           reconnectionAttempts: 5,
@@ -249,13 +251,37 @@ export default function Home() {
             callId: data.callId,
             callerId: data.callerId,
             callerName: data.callerName,
-            callerAvatar: null,
+            callerAvatar: data.callerAvatar || null,
             type: data.callType || 'INSTANT',
+            callRoomId: data.callRoomId || null,
           });
         });
 
-        socket.on('call-ended', () => {
-          useAppStore.getState().endCall();
+        socket.on('call-accepted', (data: any) => {
+          // When the other party accepts, if parent is in connecting state,
+          // transition to active (Jitsi handles the actual connection)
+          const store = useAppStore.getState();
+          if (store.currentCall && store.currentCall.id === data.callId) {
+            // The call is accepted — Jitsi will detect the other participant joining
+            // No action needed here, Jitsi handles it automatically via room
+          }
+        });
+
+        socket.on('call-rejected', (data: any) => {
+          const store = useAppStore.getState();
+          if (store.currentCall && store.currentCall.id === data.callId) {
+            store.endCall();
+            toast.error('Call Declined', {
+              description: 'The other person declined your call.',
+            });
+          }
+        });
+
+        socket.on('call-ended', (data: any) => {
+          const store = useAppStore.getState();
+          if (store.currentCall && (!data?.callId || store.currentCall.id === data.callId)) {
+            store.endCall();
+          }
         });
 
         socket.on('new-notification', (data: any) => {

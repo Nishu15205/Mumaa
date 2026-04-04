@@ -2,7 +2,7 @@
 // MUMAA Platform - Jitsi Meet Configuration
 // ============================================================
 
-const JITSI_DOMAIN = process.env.NEXT_PUBLIC_JITSI_DOMAIN || 'meet.jit.si';
+export const JITSI_DOMAIN = process.env.NEXT_PUBLIC_JITSI_DOMAIN || 'meet.jit.si';
 
 /**
  * Generate a MUMAA room name from a call ID.

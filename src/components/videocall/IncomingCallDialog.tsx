@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { PhoneOff, Phone, Video } from 'lucide-react'
 import { useAppStore } from '@/stores/app-store'
 import { useAuthStore } from '@/stores/auth-store'
+import { apiPut } from '@/lib/api'
+import { toast } from 'sonner'
 import type { IncomingCall } from '@/types'
 
 interface IncomingCallDialogProps {
@@ -12,12 +14,25 @@ interface IncomingCallDialogProps {
 }
 
 export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
-  const { startCall, endCall, setIncomingCall, currentCall } = useAppStore()
+  const { startCall, setIncomingCall, currentCall } = useAppStore()
   const { user } = useAuthStore()
   const [timeLeft, setTimeLeft] = useState(30)
+  const [accepting, setAccepting] = useState(false)
 
-  const handleAccept = useCallback(() => {
-    if (!call || !user) return
+  const handleAccept = useCallback(async () => {
+    if (!call || !user || accepting) return
+
+    setAccepting(true)
+
+    try {
+      // Update call status to ACCEPTED via API
+      await apiPut(`/api/calls/${call.callId}/status`, { status: 'ACCEPTED' })
+    } catch {
+      // Non-critical: continue even if status update fails
+    }
+
+    // Build the correct room name — use the real callRoomId from the socket event
+    const roomName = call.callRoomId || `mumaa-${call.callId}`
 
     // Create a CallSession from incoming call data
     const session: import('@/types').CallSession = {
@@ -29,14 +44,14 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       parentAvatar: user.role === 'PARENT' ? user.avatar : null,
       nannyAvatar: user.role === 'NANNY' ? user.avatar : null,
       type: call.type,
-      status: 'ACTIVE',
+      status: 'ACCEPTED',
       scheduledAt: null,
       startedAt: new Date().toISOString(),
       endedAt: null,
       duration: 0,
       price: 0,
       notes: null,
-      callRoomId: `room-${call.callId}`,
+      callRoomId: roomName,
       rating: null,
       reviewComment: null,
       createdAt: new Date().toISOString(),
@@ -45,11 +60,21 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
 
     startCall(session)
     setIncomingCall(null)
-  }, [call, user, startCall, setIncomingCall])
+  }, [call, user, startCall, setIncomingCall, accepting])
 
-  const handleDecline = useCallback(() => {
+  const handleDecline = useCallback(async () => {
+    if (!call) return
+
+    try {
+      // Update call status to CANCELLED
+      await apiPut(`/api/calls/${call.callId}/status`, { status: 'CANCELLED' })
+    } catch {
+      // Non-critical
+    }
+
     setIncomingCall(null)
-  }, [setIncomingCall])
+    toast.info('Call declined')
+  }, [call, setIncomingCall])
 
   // Auto-dismiss after 30 seconds
   useEffect(() => {
@@ -168,7 +193,8 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
               whileHover={{ scale: 1.08 }}
               whileTap={{ scale: 0.95 }}
               onClick={handleAccept}
-              className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-colors"
+              disabled={accepting}
+              className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-colors disabled:opacity-60"
             >
               <Phone className="w-7 h-7 text-white" />
             </motion.button>

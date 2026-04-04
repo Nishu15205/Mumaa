@@ -10,7 +10,6 @@ import {
   Video,
   DollarSign,
   User,
-  Ringing,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
@@ -60,11 +59,20 @@ export default function NannyCalls() {
   const handleAccept = async (call: CallSession) => {
     try {
       await apiPut(`/api/calls/${call.id}/status`, { status: 'ACCEPTED' });
-      toast.success('Call accepted!');
+      toast.success('Call accepted! Joining video call...');
       fetchCalls();
+
+      // Auto-join the video call after accepting
+      setTimeout(() => {
+        startCall(call);
+      }, 500);
     } catch {
       toast.error('Failed to accept call');
     }
+  };
+
+  const handleJoinCall = (call: CallSession) => {
+    startCall(call);
   };
 
   const handleDecline = async (call: CallSession) => {
@@ -199,7 +207,7 @@ export default function NannyCalls() {
               {call.status === 'ACCEPTED' && (
                 <Button
                   size="sm"
-                  onClick={() => startCall(call)}
+                  onClick={() => handleJoinCall(call)}
                   className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs gap-1 h-7"
                 >
                   <Video className="h-3 w-3" />
