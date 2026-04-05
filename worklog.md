@@ -580,3 +580,32 @@ Stage Summary:
 - Solution: Dedicated HTTP API server on port 3004 using Bun.serve() for proper body handling
 - Nanny now receives real-time incoming-call notifications when parent calls
 - 0 lint errors, all APIs tested working
+
+---
+Task ID: 15
+Agent: Main Agent
+Task: Fix nanny not receiving incoming call - socket service crash + polling fallback
+
+Work Log:
+- Found socket service dying after Next.js API calls
+- Root cause: Bun's http.createServer hangs when receiving HTTP requests from Node.js undici (Next.js internal fetch), missing request body timeout causes silent process death
+- Fixed by adding `Connection: close` header to all API → socket service requests
+- Added request timeout (10s) to socket service HTTP API to prevent hangs
+- Changed from `Bun.serve` back to `http.createServer` for the API (more stable with streaming bodies)
+- Replaced `io.sockets.sockets.get()` with direct socket reference Map (more reliable in Bun)
+- Made ALL socket handlers try/catch wrapped — errors logged but never crash
+- Removed `process.exit()` from uncaughtException handler — service stays alive
+- Added auto-polling (5s) to NannyCalls so nanny sees incoming calls even without socket connection
+- Added toast notification when new incoming call appears on nanny side
+- Added auto-switch to "Incoming" tab when call arrives
+
+Files Changed:
+- mini-services/socket-service/index.ts (complete rewrite — crash-proof, stores socket refs directly)
+- src/app/api/calls/instant/route.ts (Connection: close + AbortController timeout)
+- src/app/api/calls/[id]/status/route.ts (Connection: close header)
+- src/components/dashboard/nanny/NannyCalls.tsx (auto-poll every 5s, toast on new call)
+
+Stage Summary:
+- Socket service now survives Next.js API calls reliably
+- Nanny sees incoming calls via polling even if socket connection drops
+- Both socket real-time AND polling fallback work together

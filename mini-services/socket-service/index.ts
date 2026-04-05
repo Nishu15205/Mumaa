@@ -1,472 +1,219 @@
 import { createServer } from 'http'
-import { Server, Socket } from 'socket.io'
+import { Server } from 'socket.io'
 import { Database } from 'bun:sqlite'
 
 // ─── Database ──────────────────────────────────────────────────────────────
 
 const DB_PATH = '../../db/custom.db'
-
 let db: Database | null = null
-
 try {
   db = new Database(DB_PATH, { readonly: true })
-  console.log('[db] Connected to SQLite database via bun:sqlite')
+  console.log('[db] Connected')
 } catch (err) {
-  console.warn('[db] Could not open database, running without DB access:', (err as Error).message)
+  console.warn('[db] Not available:', (err as Error).message)
 }
 
-/** Safely query user info from the database */
-function getUserById(userId: string): { id: string; name: string; role: string } | null {
+function getUserById(userId: string) {
   if (!db) return null
-  try {
-    const row = db.query('SELECT id, name, role FROM User WHERE id = ?').get(userId) as any
-    return row ? { id: row.id, name: row.name, role: row.role } : null
-  } catch {
-    return null
-  }
+  try { return db.query('SELECT id, name, role FROM User WHERE id = ?').get(userId) as any } catch { return null }
 }
 
-/** Safely query a call session by id */
-function getCallSession(callId: string): any {
+function getCallSession(callId: string) {
   if (!db) return null
-  try {
-    return db.query('SELECT * FROM CallSession WHERE id = ?').get(callId)
-  } catch {
-    return null
-  }
+  try { return db.query('SELECT * FROM CallSession WHERE id = ?').get(callId) } catch { return null }
 }
 
-// ─── Types ─────────────────────────────────────────────────────────────────
-
-interface AuthPayload {
-  userId: string
-  role: string
-}
-
-interface OnlineUser {
-  userId: string
-  role: string
-  connectedAt: number
-  socketId: string
-}
-
-// ─── State (shared between Socket.IO and HTTP API) ─────────────────────────
+// ─── State ─────────────────────────────────────────────────────────────────
 
 const SOCKET_PORT = 3003
 const API_PORT = 3004
 
-/** userId → socket.id */
-const userSockets = new Map<string, string>()
-
-/** socket.id → userId */
+const userSockets = new Map<string, any>()
 const socketUsers = new Map<string, string>()
-
-/** Set of currently online userIds */
 const onlineUsers = new Set<string>()
+const onlineUserInfo = new Map<string, any>()
 
-/** Detailed online user info */
-const onlineUserInfo = new Map<string, OnlineUser>()
+function getSocketByUserId(userId: string) { return userSockets.get(userId) || null }
 
-// ─── Socket.IO Server (port 3003) ──────────────────────────────────────────
+function broadcastOnlineUsers() {
+  try { io.emit('online-users', { users: Array.from(onlineUserInfo.values()) }) } catch { /* ignore */ }
+}
+
+// ─── Socket.IO (port 3003) ────────────────────────────────────────────────
 
 const httpServer = createServer()
 
 const io = new Server(httpServer, {
   path: '/socket.io',
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['*'],
-    credentials: true,
-  },
+  cors: { origin: '*', methods: ['GET', 'POST'], allowedHeaders: ['*'], credentials: true },
   pingTimeout: 60000,
   pingInterval: 25000,
 })
 
-// ─── HTTP API Server (port 3004) — Using Bun.serve for proper body handling
-// Separate server so Socket.IO engine doesn't intercept API requests
+io.on('connection', (socket) => {
+  console.log(`[+] ${socket.id} (${io.sockets.sockets.size})`)
 
-Bun.serve({
-  port: API_PORT,
-  async fetch(req) {
-    const url = new URL(req.url)
+  try { socket.emit('online-users', { users: Array.from(onlineUserInfo.values()) }) } catch { /* ignore */ }
 
-    // CORS preflight
-    if (req.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      })
-    }
+  socket.on('auth', (payload: any) => {
+    try {
+      const { userId, role } = payload || {}
+      if (!userId || !role) return
+      const user = getUserById(userId)
+      console.log(`[auth] ${user?.name || userId} (${role})`)
+      socket.data = { userId, role }
+      userSockets.set(userId, socket)
+      socketUsers.set(socket.id, userId)
+      onlineUsers.add(userId)
+      onlineUserInfo.set(userId, { userId, role, connectedAt: Date.now(), socketId: socket.id })
+      socket.join(`user:${userId}`)
+      socket.join(`role:${role.toLowerCase()}`)
+      io.emit('user-online', { userId, role })
+      broadcastOnlineUsers()
+      socket.emit('auth-success', { userId, role })
+      console.log(`[ok] ${userId} online (${onlineUsers.size})`)
+    } catch (err) { console.error('[auth] err:', err) }
+  })
 
-    // POST /emit — Send a socket event to a specific user
-    if (url.pathname === '/emit' && req.method === 'POST') {
+  socket.on('incoming-call', (p: any) => {
+    try {
+      const { toUserId, callId, callerName, callType } = p || {}
+      if (!socket.data?.userId) return
+      const t = getSocketByUserId(toUserId)
+      if (t) {
+        t.emit('incoming-call', { callId, callerId: socket.data.userId, callerName: callerName || 'Unknown', callerAvatar: null, callType: callType || 'INSTANT' })
+        console.log(`[call] incoming -> ${toUserId}`)
+      } else {
+        console.log(`[call] incoming -> ${toUserId} OFFLINE`)
+        socket.emit('call-error', { callId, toUserId, error: 'User is currently offline' })
+      }
+    } catch (err) { console.error('[call] err:', err) }
+  })
+
+  socket.on('call-accepted', (p: any) => {
+    try {
+      const { callId, toUserId, roomName } = p || {}
+      if (!socket.data?.userId) return
+      const t = getSocketByUserId(toUserId)
+      if (t) {
+        const s = getCallSession(callId)
+        t.emit('call-accepted', { callId, accepterId: socket.data.userId, roomName: roomName || s?.callRoomId || null })
+        console.log(`[call] accepted -> ${toUserId}`)
+      }
+    } catch (err) { console.error('[call-accepted] err:', err) }
+  })
+
+  socket.on('call-rejected', (p: any) => {
+    try {
+      const { callId, toUserId } = p || {}
+      if (!socket.data?.userId) return
+      const t = getSocketByUserId(toUserId)
+      if (t) { t.emit('call-rejected', { callId, rejecterId: socket.data.userId }); console.log(`[call] rejected -> ${toUserId}`) }
+    } catch (err) { console.error('[call-rejected] err:', err) }
+  })
+
+  socket.on('call-ended', (p: any) => {
+    try {
+      const { callId, toUserId, reason } = p || {}
+      if (!socket.data?.userId) return
+      const t = getSocketByUserId(toUserId)
+      if (t) { t.emit('call-ended', { callId, enderId: socket.data.userId, reason }); console.log(`[call] ended -> ${toUserId}`) }
+    } catch (err) { console.error('[call-ended] err:', err) }
+  })
+
+  socket.on('webrtc-offer', (p: any) => { try { const t = getSocketByUserId(p?.toUserId); if (t) t.emit('webrtc-offer', { callId: p?.callId, fromUserId: socket.data?.userId, sdp: p?.sdp }) } catch {} })
+  socket.on('webrtc-answer', (p: any) => { try { const t = getSocketByUserId(p?.toUserId); if (t) t.emit('webrtc-answer', { callId: p?.callId, fromUserId: socket.data?.userId, sdp: p?.sdp }) } catch {} })
+  socket.on('webrtc-ice-candidate', (p: any) => { try { const t = getSocketByUserId(p?.toUserId); if (t) t.emit('webrtc-ice-candidate', { callId: p?.callId, fromUserId: socket.data?.userId, candidate: p?.candidate }) } catch {} })
+
+  socket.on('new-notification', (p: any) => {
+    try {
+      const t = getSocketByUserId(p?.toUserId)
+      if (t) {
+        t.emit('new-notification', { notification: { ...p.notification, timestamp: new Date().toISOString() } })
+      }
+    } catch { /* ignore */ }
+  })
+
+  socket.on('disconnect', (reason) => {
+    try {
+      const userId = socketUsers.get(socket.id)
+      if (userId) {
+        userSockets.delete(userId); socketUsers.delete(socket.id); onlineUsers.delete(userId); onlineUserInfo.delete(userId)
+        io.emit('user-offline', { userId, role: socket.data?.role })
+        broadcastOnlineUsers()
+        console.log(`[-] ${userId} (${socket.data?.role}) — ${onlineUsers.size} online`)
+      }
+    } catch (err) { console.error('[disconnect] err:', err) }
+  })
+
+  socket.on('error', (e: any) => { console.error(`[!] ${socket.id}:`, e?.message || e) })
+})
+
+// ─── HTTP API (port 3004) — using http.createServer with TIMEOUT ──────────
+
+const apiServer = createServer((req, res) => {
+  const respond = (code: number, data: any) => {
+    res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+    res.end(JSON.stringify(data))
+  }
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type' })
+    res.end()
+    return
+  }
+
+  if (req.method === 'GET' && req.url === '/health') {
+    respond(200, { status: 'ok', onlineUsers: onlineUsers.size, onlineList: Array.from(onlineUsers) })
+    return
+  }
+
+  if (req.method === 'POST' && req.url === '/emit') {
+    // CRITICAL: Set a timeout to prevent hanging if body stream never ends
+    const timeout = setTimeout(() => { req.destroy(); respond(408, { error: 'timeout' }) }, 10000)
+    let body = ''
+
+    req.on('data', (chunk: Buffer) => { body += chunk.toString() })
+    req.on('error', () => { clearTimeout(timeout); respond(400, { error: 'stream_error' }) })
+    req.on('end', () => {
+      clearTimeout(timeout)
       try {
-        const body = await req.json()
-        const { toUserId, event, data } = body
-
-        if (!toUserId || !event) {
-          return Response.json(
-            { error: 'toUserId and event are required' },
-            { status: 400, headers: corsHeaders() }
-          )
-        }
+        const { toUserId, event, data } = JSON.parse(body)
+        if (!toUserId || !event) { respond(400, { error: 'toUserId and event required' }); return }
 
         const target = getSocketByUserId(toUserId)
         if (target) {
           target.emit(event, data || {})
-          console.log(`[api-emit] -> ${event} to ${toUserId} ✓`)
-          return Response.json(
-            { success: true, delivered: true },
-            { headers: corsHeaders() }
-          )
+          console.log(`[api] ${event} -> ${toUserId} ✓`)
+          respond(200, { success: true, delivered: true })
         } else {
-          console.log(`[api-emit] -> ${event} to ${toUserId} ✗ (offline)`)
-          return Response.json(
-            { success: true, delivered: false, reason: 'user_offline' },
-            { headers: corsHeaders() }
-          )
+          console.log(`[api] ${event} -> ${toUserId} ✗ (offline)`)
+          respond(200, { success: true, delivered: false, reason: 'user_offline' })
         }
       } catch (err) {
-        return Response.json(
-          { error: 'Invalid JSON body' },
-          { status: 400, headers: corsHeaders() }
-        )
+        respond(400, { error: 'invalid json' })
       }
-    }
-
-    // GET /health — Health check
-    if (url.pathname === '/health' && req.method === 'GET') {
-      return Response.json({
-        status: 'ok',
-        onlineUsers: onlineUsers.size,
-        socketPort: SOCKET_PORT,
-        apiPort: API_PORT,
-      }, { headers: corsHeaders() })
-    }
-
-    return Response.json(
-      { error: 'Not Found' },
-      { status: 404, headers: corsHeaders() }
-    )
-  },
-})
-
-function corsHeaders() {
-  return { 'Access-Control-Allow-Origin': '*' }
-}
-
-// ─── Helpers ───────────────────────────────────────────────────────────────
-
-function getSocketByUserId(userId: string): Socket | undefined {
-  const socketId = userSockets.get(userId)
-  if (!socketId) return undefined
-  return io.sockets.sockets.get(socketId)
-}
-
-function getOnlineUsersList(): OnlineUser[] {
-  return Array.from(onlineUserInfo.values())
-}
-
-function log(socket: Socket, event: string, data?: unknown) {
-  const userId = socketUsers.get(socket.id) || socket.id
-  const ts = new Date().toISOString().split('T')[1].slice(0, 12)
-  if (data) {
-    console.log(`[${ts}] [${userId}] ${event}:`, typeof data === 'string' ? data : JSON.stringify(data))
-  } else {
-    console.log(`[${ts}] [${userId}] ${event}`)
-  }
-}
-
-// ─── Socket.IO Connection ──────────────────────────────────────────────────
-
-io.on('connection', (socket) => {
-  const clientIp = socket.handshake.address || 'unknown'
-  console.log(`[+] Connection ${socket.id} from ${clientIp} (total: ${io.sockets.sockets.size})`)
-
-  // Send the current online users list to this new client
-  socket.emit('online-users', { users: getOnlineUsersList() })
-
-  // ─── Auth ───────────────────────────────────────────────────────────────
-
-  socket.on('auth', (payload: AuthPayload) => {
-    const { userId, role } = payload
-
-    if (!userId || !role) {
-      log(socket, 'auth failed — missing userId or role')
-      socket.emit('auth-error', { message: 'Authentication failed: missing credentials' })
-      return
-    }
-
-    // Optionally verify user exists in the database
-    const user = getUserById(userId)
-    if (user) {
-      log(socket, 'auth verified from DB', { name: user.name, role: user.role })
-    } else if (db) {
-      log(socket, 'auth — user not found in DB, allowing anyway')
-    } else {
-      log(socket, 'auth — no DB, trusting client-provided role')
-    }
-
-    // Store socket ↔ user mappings
-    socket.data.userId = userId
-    socket.data.role = role
-    userSockets.set(userId, socket.id)
-    socketUsers.set(socket.id, userId)
-    onlineUsers.add(userId)
-    onlineUserInfo.set(userId, {
-      userId,
-      role,
-      connectedAt: Date.now(),
-      socketId: socket.id,
     })
+    return
+  }
 
-    // Have the socket join its own room and a role-based room
-    socket.join(`user:${userId}`)
-    socket.join(`role:${role.toLowerCase()}`)
-
-    // Broadcast presence to everyone
-    io.emit('user-online', { userId, role })
-    io.emit('online-users', { users: getOnlineUsersList() })
-
-    // Send auth confirmation back
-    socket.emit('auth-success', { userId, role })
-
-    console.log(`[ok] ${userId} (${role}) authenticated — online: ${onlineUsers.size}`)
-  })
-
-  // ─── Incoming Call (parent → nanny) ─────────────────────────────────────
-
-  socket.on('incoming-call', (payload: { toUserId: string; callId: string; callerName: string; callType?: string }) => {
-    const { toUserId, callId, callerName, callType } = payload
-    log(socket, 'incoming-call', { toUserId, callId })
-
-    const callerId = socket.data.userId
-    if (!callerId) {
-      log(socket, 'incoming-call rejected — not authenticated')
-      return
-    }
-
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('incoming-call', {
-        callId,
-        callerId,
-        callerName: callerName || 'Unknown',
-        callerAvatar: null,
-        callType: callType || 'INSTANT',
-      })
-      log(socket, '-> incoming-call delivered', { toUserId, callId })
-    } else {
-      log(socket, '-> incoming-call FAILED — target offline', { toUserId })
-      socket.emit('call-error', { callId, toUserId, error: 'User is currently offline' })
-    }
-  })
-
-  // ─── Call Accepted (nanny → parent) ─────────────────────────────────────
-
-  socket.on('call-accepted', (payload: { callId: string; toUserId: string; roomName?: string }) => {
-    const { callId, toUserId, roomName } = payload
-    log(socket, 'call-accepted', { callId, toUserId })
-
-    const accepterId = socket.data.userId
-    if (!accepterId) return
-
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      const session = getCallSession(callId)
-      target.emit('call-accepted', {
-        callId,
-        accepterId,
-        roomName: roomName || session?.callRoomId || null,
-      })
-      log(socket, '-> call-accepted delivered', { toUserId })
-    }
-  })
-
-  // ─── Call Rejected ──────────────────────────────────────────────────────
-
-  socket.on('call-rejected', (payload: { callId: string; toUserId: string }) => {
-    const { callId, toUserId } = payload
-    log(socket, 'call-rejected', { callId, toUserId })
-
-    const rejecterId = socket.data.userId
-    if (!rejecterId) return
-
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('call-rejected', { callId, rejecterId })
-      log(socket, '-> call-rejected delivered', { toUserId })
-    }
-  })
-
-  // ─── Call Ended ─────────────────────────────────────────────────────────
-
-  socket.on('call-ended', (payload: { callId: string; toUserId: string; reason?: string }) => {
-    const { callId, toUserId, reason } = payload
-    log(socket, 'call-ended', { callId, toUserId, reason })
-
-    const enderId = socket.data.userId
-    if (!enderId) return
-
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('call-ended', { callId, enderId, reason })
-      log(socket, '-> call-ended delivered', { toUserId })
-    }
-  })
-
-  // ─── New Notification ───────────────────────────────────────────────────
-
-  socket.on('new-notification', (payload: { toUserId: string; notification: any }) => {
-    const { toUserId, notification } = payload
-    log(socket, 'new-notification', { toUserId, type: notification?.type })
-
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      const enriched = {
-        ...notification,
-        id: notification?.id || `notif-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-        timestamp: new Date().toISOString(),
-      }
-      target.emit('new-notification', { notification: enriched })
-      log(socket, '-> new-notification delivered', { toUserId })
-    } else {
-      log(socket, '-> new-notification skipped — user offline', { toUserId })
-    }
-  })
-
-  // ─── Typing Indicator ───────────────────────────────────────────────────
-
-  socket.on('typing', (payload: { toUserId: string; conversationId: string; isTyping?: boolean }) => {
-    const { toUserId, conversationId, isTyping } = payload
-    const senderId = socket.data.userId
-    if (!senderId) return
-
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('typing', {
-        userId: senderId,
-        conversationId,
-        isTyping: isTyping !== false,
-        timestamp: Date.now(),
-      })
-    }
-  })
-
-  // ─── WebRTC Signaling: relay offers, answers, and ICE candidates ───────
-
-  socket.on('webrtc-offer', (payload: { callId: string; toUserId: string; sdp: any }) => {
-    const { callId, toUserId, sdp } = payload
-    const fromUserId = socket.data.userId
-    if (!fromUserId) return
-    log(socket, 'webrtc-offer', { callId, to: toUserId })
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('webrtc-offer', { callId, fromUserId, sdp })
-    }
-  })
-
-  socket.on('webrtc-answer', (payload: { callId: string; toUserId: string; sdp: any }) => {
-    const { callId, toUserId, sdp } = payload
-    const fromUserId = socket.data.userId
-    if (!fromUserId) return
-    log(socket, 'webrtc-answer', { callId, to: toUserId })
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('webrtc-answer', { callId, fromUserId, sdp })
-    }
-  })
-
-  socket.on('webrtc-ice-candidate', (payload: { callId: string; toUserId: string; candidate: any }) => {
-    const { callId, toUserId, candidate } = payload
-    const fromUserId = socket.data.userId
-    if (!fromUserId) return
-    const target = getSocketByUserId(toUserId)
-    if (target) {
-      target.emit('webrtc-ice-candidate', { callId, fromUserId, candidate })
-    }
-  })
-
-  // ─── Disconnect ─────────────────────────────────────────────────────────
-
-  socket.on('disconnect', (reason) => {
-    log(socket, 'disconnect', { reason })
-
-    const userId = socketUsers.get(socket.id)
-    if (userId) {
-      const role = socket.data.role
-
-      // Clean up all mappings
-      userSockets.delete(userId)
-      socketUsers.delete(socket.id)
-      onlineUsers.delete(userId)
-      onlineUserInfo.delete(userId)
-
-      // Broadcast offline status
-      io.emit('user-offline', { userId, role })
-      io.emit('online-users', { users: getOnlineUsersList() })
-
-      console.log(`[-] ${userId} (${role}) disconnected — online: ${onlineUsers.size}`)
-    }
-
-    console.log(`[-] Socket ${socket.id} dropped (${reason}) — total: ${io.sockets.sockets.size}`)
-  })
-
-  // ─── Error Handling ─────────────────────────────────────────────────────
-
-  socket.on('error', (error) => {
-    console.error(`[!] Socket error (${socket.id}):`, error?.message || error)
-  })
+  respond(404, { error: 'Not Found' })
 })
 
-// ─── Start Both Servers ────────────────────────────────────────────────────
+// ─── Start ─────────────────────────────────────────────────────────────────
 
 httpServer.listen(SOCKET_PORT, () => {
-  console.log('')
-  console.log('=======================================================')
-  console.log('  MUMAA Socket Service')
-  console.log(`  Socket.IO: port ${SOCKET_PORT}`)
-  console.log(`  HTTP API:  port ${API_PORT} (Bun.serve)`)
-  console.log(`  DB:        ${db ? DB_PATH : 'not available'}`)
-  console.log('  CORS:      all origins enabled')
-  console.log('  Ready for connections')
-  console.log('=======================================================')
-  console.log('')
+  console.log(`Socket.IO on :${SOCKET_PORT}`)
+  console.log(`HTTP API on :${API_PORT}`)
+  console.log(`DB: ${db ? 'ok' : 'not available'}`)
+  console.log('Ready!\n')
 })
 
-// ─── Graceful Shutdown ─────────────────────────────────────────────────────
-
-function shutdown(signal: string) {
-  console.log(`\n[!] ${signal} received, shutting down...`)
-
-  io.emit('server-shutdown', { message: 'Server shutting down', timestamp: new Date().toISOString() })
-  io.disconnectSockets(true)
-
-  httpServer.close(() => {
-    if (db) db.close()
-    console.log('[ok] Socket service stopped')
-    process.exit(0)
-  })
-
-  setTimeout(() => {
-    console.error('[!] Forced shutdown after timeout')
-    process.exit(1)
-  }, 5000)
-}
-
-process.on('SIGTERM', () => shutdown('SIGTERM'))
-process.on('SIGINT', () => shutdown('SIGINT'))
-
-process.on('uncaughtException', (err) => {
-  console.error('[!!!] Uncaught exception:', err)
-  shutdown('uncaughtException')
+apiServer.listen(API_PORT, () => {
+  console.log(`[api] HTTP API server on :${API_PORT}`)
 })
 
-process.on('unhandledRejection', (reason) => {
-  console.error('[!!!] Unhandled rejection:', reason)
-})
+// ─── NEVER crash ───────────────────────────────────────────────────────────
+
+process.on('uncaughtException', (err) => { console.error('[!!!] Exception:', err) })
+process.on('unhandledRejection', (reason) => { console.error('[!!!] Rejection:', reason) })

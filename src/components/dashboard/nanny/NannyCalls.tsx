@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Phone,
@@ -61,10 +61,28 @@ export default function NannyCalls() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('incoming');
   const [visibleCount, setVisibleCount] = useState(10);
+  const prevIncomingCountRef = useRef(0);
 
+  // Fetch calls on mount and auto-refresh every 5 seconds to catch incoming calls
   useEffect(() => {
     fetchCalls();
+    const interval = setInterval(fetchCalls, 5000);
+    return () => clearInterval(interval);
   }, [user?.id]);
+
+  // Show toast when a new incoming call appears
+  useEffect(() => {
+    if (incomingCalls.length > prevIncomingCountRef.current && prevIncomingCountRef.current >= 0) {
+      const newCall = incomingCalls[0];
+      toast('📞 Incoming Call!', {
+        description: `${newCall.parentName} wants to connect`,
+        duration: 8000,
+      });
+      // Auto-switch to incoming tab
+      setActiveTab('incoming');
+    }
+    prevIncomingCountRef.current = incomingCalls.length;
+  }, [incomingCalls.length]);
 
   const fetchCalls = async () => {
     if (!user?.id) return;
