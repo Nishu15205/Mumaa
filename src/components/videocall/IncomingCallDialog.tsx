@@ -15,10 +15,17 @@ interface IncomingCallDialogProps {
 }
 
 export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
-  const { startCall, setIncomingCall, currentCall } = useAppStore()
+  const { startCall, setIncomingCall, currentCall, socket } = useAppStore()
   const { user } = useAuthStore()
   const [timeLeft, setTimeLeft] = useState(30)
   const [accepting, setAccepting] = useState(false)
+
+  // Emit via the shared socket from app-store (no temp sockets!)
+  const emitSocket = useCallback((event: string, data: any) => {
+    if (socket?.connected) {
+      socket.emit(event, data)
+    }
+  }, [socket])
 
   const handleAccept = useCallback(async () => {
     if (!call || !user || accepting) return
@@ -27,36 +34,20 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
     setAccepting(true)
 
     try {
-      // Update call status to ACCEPTED via API
       await apiPut(`/api/calls/${call.callId}/status`, { status: 'ACCEPTED' })
     } catch {
       // Non-critical: continue even if status update fails
     }
 
-    // Notify caller via socket that we accepted (with auth!)
-    try {
-      const { io } = await import('socket.io-client')
-      const socket = io('/?XTransformPort=3003', {
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-      })
-      socket.on('connect', () => {
-        socket.emit('auth', { userId: user?.id, role: user?.role })
-        socket.emit('call-accepted', {
-          callId: call.callId,
-          toUserId: call.callerId,
-          roomName: call.callRoomId || null,
-        })
-        setTimeout(() => socket.disconnect(), 1500)
-      })
-    } catch {
-      // Non-critical: socket notification failed
-    }
+    // Notify caller via shared socket (already connected and authenticated!)
+    emitSocket('call-accepted', {
+      callId: call.callId,
+      toUserId: call.callerId,
+      roomName: call.callRoomId || null,
+    })
 
-    // Build the correct room name — use the real callRoomId from the socket event
     const roomName = call.callRoomId || `mumaa-${call.callId}`
 
-    // Create a CallSession from incoming call data
     const session: import('@/types').CallSession = {
       id: call.callId,
       parentId: user.role === 'PARENT' ? user.id : call.callerId,
@@ -82,7 +73,7 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
 
     startCall(session)
     setIncomingCall(null)
-  }, [call, user, startCall, setIncomingCall, accepting])
+  }, [call, user, startCall, setIncomingCall, accepting, emitSocket])
 
   const handleDecline = useCallback(async () => {
     if (!call) return
@@ -90,34 +81,19 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
     stopRingtone()
 
     try {
-      // Update call status to CANCELLED
       await apiPut(`/api/calls/${call.callId}/status`, { status: 'CANCELLED' })
     } catch {
       // Non-critical
     }
 
-    // Notify caller via socket that we declined (with auth!)
-    try {
-      const { io } = await import('socket.io-client')
-      const socket = io('/?XTransformPort=3003', {
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-      })
-      socket.on('connect', () => {
-        socket.emit('auth', { userId: user?.id, role: user?.role })
-        socket.emit('call-rejected', {
-          callId: call.callId,
-          toUserId: call.callerId,
-        })
-        setTimeout(() => socket.disconnect(), 1500)
-      })
-    } catch {
-      // Non-critical
-    }
+    emitSocket('call-rejected', {
+      callId: call.callId,
+      toUserId: call.callerId,
+    })
 
     setIncomingCall(null)
     toast.info('Call declined')
-  }, [call, setIncomingCall])
+  }, [call, setIncomingCall, emitSocket])
 
   // Auto-dismiss after 30 seconds
   useEffect(() => {
@@ -126,7 +102,6 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       return
     }
 
-    // Start ringtone when call arrives
     startRingtone()
 
     let remaining = 30
@@ -137,20 +112,9 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
         clearInterval(timer)
         stopRingtone()
 
-        // Auto-decline: update status and notify caller
         if (call.callId && call.callerId) {
           apiPut(`/api/calls/${call.callId}/status`, { status: 'CANCELLED' }).catch(() => {})
-          import('socket.io-client').then(({ io }) => {
-            const socket = io('/?XTransformPort=3003', {
-              path: '/socket.io',
-              transports: ['websocket', 'polling'],
-            })
-            socket.on('connect', () => {
-              socket.emit('auth', { userId: user?.id, role: user?.role })
-              socket.emit('call-rejected', { callId: call.callId, toUserId: call.callerId })
-              setTimeout(() => socket.disconnect(), 1500)
-            })
-          }).catch(() => {})
+          emitSocket('call-rejected', { callId: call.callId, toUserId: call.callerId })
         }
 
         setIncomingCall(null)
@@ -163,7 +127,7 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       clearInterval(timer)
       stopRingtone()
     }
-  }, [call, setIncomingCall])
+  }, [call, setIncomingCall, emitSocket])
 
   // Don't render if there's no incoming call or an active call exists
   if (!call || currentCall) return null

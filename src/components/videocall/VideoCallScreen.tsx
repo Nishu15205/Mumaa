@@ -22,8 +22,8 @@ type CallState = 'waiting' | 'connecting' | 'active' | 'ended'
 const WAIT_TIMEOUT_SECONDS = 5 * 60
 
 export function VideoCallScreen() {
-  const { currentCall, endCall, waitingForNanny, setWaitingForNanny } = useAppStore()
-  const { user, isAuthenticated } = useAuthStore()
+  const { currentCall, endCall, waitingForNanny, setWaitingForNanny, socket } = useAppStore()
+  const { user } = useAuthStore()
 
   const [callState, setCallState] = useState<CallState>(() =>
     waitingForNanny ? 'waiting' : 'connecting'
@@ -37,8 +37,15 @@ export function VideoCallScreen() {
   const [callDurationOnEnd, setCallDurationOnEnd] = useState(0)
   const [waitSecondsLeft, setWaitSecondsLeft] = useState(WAIT_TIMEOUT_SECONDS)
 
-  // Socket ref for WebRTC signaling
+  // Ref to the shared socket — stays stable across renders
   const socketRef = useRef<any>(null)
+
+  // Keep socketRef in sync with the store socket
+  useEffect(() => {
+    if (socket) {
+      socketRef.current = socket
+    }
+  }, [socket])
 
   // Determine other participant info
   useEffect(() => {
@@ -51,44 +58,6 @@ export function VideoCallScreen() {
       setOtherPersonId(currentCall.parentId)
     }
   }, [currentCall, user])
-
-  // Get or create socket connection for WebRTC signaling
-  useEffect(() => {
-    if (!isAuthenticated || !user?.id || !user?.role) return
-    let disconnected = false
-
-    const initSocket = async () => {
-      try {
-        const { io } = await import('socket.io-client')
-        if (disconnected) return
-
-        const socket = io('/?XTransformPort=3003', {
-          path: '/socket.io',
-          transports: ['websocket', 'polling'],
-          reconnection: true,
-          reconnectionAttempts: 5,
-        })
-
-        socket.on('connect', () => {
-          socket.emit('auth', { userId: user.id, role: user.role })
-        })
-
-        socketRef.current = socket
-      } catch {
-        // Socket not available
-      }
-    }
-
-    initSocket()
-
-    return () => {
-      disconnected = true
-      if (socketRef.current) {
-        socketRef.current.disconnect()
-        socketRef.current = null
-      }
-    }
-  }, [isAuthenticated, user?.id, user?.role])
 
   // 5-minute countdown for waiting
   useEffect(() => {
@@ -223,7 +192,8 @@ export function VideoCallScreen() {
   const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 
   const isCaller = user?.role === 'PARENT'
-  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketRef.current
+  // Use the shared socket — it's already connected and authenticated from page.tsx
+  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketRef.current?.connected
 
   return (
     <motion.div

@@ -225,11 +225,10 @@ export default function Home() {
     setDashboardPage(page);
   }, []);
 
-  // Socket.IO for real-time features
+  // Socket.IO — single shared connection stored in app-store for reuse by VideoCallScreen etc.
   useEffect(() => {
     if (!isAuthenticated || !user?.id || !user?.role) return;
 
-    let socket: any = null;
     let disconnected = false;
 
     const initSocket = async () => {
@@ -237,7 +236,7 @@ export default function Home() {
         const { io } = await import('socket.io-client');
         if (disconnected) return;
 
-        socket = io('/?XTransformPort=3003', {
+        const socket = io('/?XTransformPort=3003', {
           path: '/socket.io',
           transports: ['websocket', 'polling'],
           reconnection: true,
@@ -247,6 +246,11 @@ export default function Home() {
 
         socket.on('connect', () => {
           socket.emit('auth', { userId: user.id, role: user.role });
+          useAppStore.getState().setSocketAuthenticated(true);
+        });
+
+        socket.on('disconnect', () => {
+          useAppStore.getState().setSocketAuthenticated(false);
         });
 
         socket.on('incoming-call', (data: any) => {
@@ -267,7 +271,6 @@ export default function Home() {
               ? (store.currentCall.nannyName || 'Nanny')
               : (store.currentCall.parentName || 'Parent');
 
-            // If parent was in waiting state, transition to actual video call
             if (store.waitingForNanny) {
               store.setWaitingForNanny(false);
               toast.success(`${otherName} joined!`, {
@@ -308,6 +311,9 @@ export default function Home() {
         socket.on('new-notification', (data: any) => {
           addNotification(data.notification);
         });
+
+        // Store in shared state so VideoCallScreen / IncomingCallDialog can reuse it
+        useAppStore.getState().setSocket(socket);
       } catch {
         // Socket not available, continue without real-time features
       }
@@ -317,7 +323,11 @@ export default function Home() {
 
     return () => {
       disconnected = true;
-      if (socket) socket.disconnect();
+      const storeSocket = useAppStore.getState().socket;
+      if (storeSocket) {
+        storeSocket.disconnect();
+        useAppStore.getState().setSocket(null);
+      }
     };
   }, [isAuthenticated, user?.id, user?.role]);
 

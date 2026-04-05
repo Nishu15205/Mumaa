@@ -11,6 +11,10 @@ interface AppState {
   currentCall: CallSession | null;
   incomingCall: IncomingCall | null;
   waitingForNanny: boolean;
+  /** Shared Socket.IO connection — created once in page.tsx, reused everywhere */
+  socket: any | null;
+  /** Whether the socket has been authenticated with the server */
+  socketAuthenticated: boolean;
 }
 
 interface AppActions {
@@ -22,6 +26,8 @@ interface AppActions {
   endCall: () => void;
   setIncomingCall: (call: IncomingCall | null) => void;
   setWaitingForNanny: (waiting: boolean) => void;
+  setSocket: (socket: any) => void;
+  setSocketAuthenticated: (auth: boolean) => void;
 }
 
 export const useAppStore = create<AppState & AppActions>()((set) => ({
@@ -32,6 +38,8 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
   currentCall: null,
   incomingCall: null,
   waitingForNanny: false,
+  socket: null,
+  socketAuthenticated: false,
 
   setCurrentView: (currentView) => set({ currentView }),
 
@@ -47,9 +55,6 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
       currentCall: call,
       showVideoCall: true,
       incomingCall: null,
-      // NOTE: Do NOT reset waitingForNanny here.
-      // The caller must manage it explicitly (e.g. setWaitingForNanny(true) before startCall for parent,
-      // or let it stay false for nanny joining an accepted call).
     }),
 
   endCall: () =>
@@ -62,4 +67,8 @@ export const useAppStore = create<AppState & AppActions>()((set) => ({
   setIncomingCall: (incomingCall) => set({ incomingCall }),
 
   setWaitingForNanny: (waiting) => set({ waitingForNanny: waiting }),
+
+  setSocket: (socket) => set({ socket }),
+
+  setSocketAuthenticated: (socketAuthenticated) => set({ socketAuthenticated }),
 }));

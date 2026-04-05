@@ -216,11 +216,18 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     try {
       const userId = socketUsers.get(socket.id)
+      socketUsers.delete(socket.id)
       if (userId) {
-        userSockets.delete(userId); socketUsers.delete(socket.id); onlineUsers.delete(userId); onlineUserInfo.delete(userId)
-        io.emit('user-offline', { userId, role: socket.data?.role })
-        broadcastOnlineUsers()
-        console.log(`[-] ${userId} (${socket.data?.role}) — ${onlineUsers.size} online`)
+        // Only remove user-level state if this was THE socket mapped for that user
+        // (prevents temp sockets from clearing the real connection)
+        if (userSockets.get(userId) === socket) {
+          userSockets.delete(userId)
+          onlineUsers.delete(userId)
+          onlineUserInfo.delete(userId)
+          io.emit('user-offline', { userId, role: socket.data?.role })
+          broadcastOnlineUsers()
+        }
+        console.log(`[-] ${socket.id} (${userId}) — ${onlineUsers.size} online`)
       }
     } catch (err) { console.error('[disconnect] err:', err) }
   })
