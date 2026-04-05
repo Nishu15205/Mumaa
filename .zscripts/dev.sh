@@ -1,17 +1,17 @@
 #!/bin/bash
 # Dev startup script — starts Next.js + mini-services
-cd /home/z/my-project
+cd .
 
 # Install deps
 bun install 2>/dev/null
 
 # Start socket service in background
 echo "Starting socket service..."
-cd /home/z/my-project/mini-services/socket-service
+cd ./mini-services/socket-service
 bun index.ts &
 SOCKET_PID=$!
 echo "Socket service PID: $SOCKET_PID"
-cd /home/z/my-project
+cd .
 
 # Wait for socket service to be ready
 for i in $(seq 1 10); do

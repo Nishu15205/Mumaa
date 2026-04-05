@@ -20,5 +20,5 @@ else
 fi
 
 # Start Next.js
-cd /home/z/my-project
+cd .
 exec npx next dev -p 3000

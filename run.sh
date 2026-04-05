@@ -29,5 +29,5 @@ done
 
 # Start Next.js dev server (foreground - this blocks)
 echo "Starting Next.js on :3000..."
-cd /home/z/my-project
+cd .
 exec npx next dev -p 3000
