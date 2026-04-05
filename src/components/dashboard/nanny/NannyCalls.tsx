@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '@/stores/auth-store';
 import { useAppStore } from '@/stores/app-store';
 import { apiGet, apiPut } from '@/lib/api';
+import { playNotificationBeep } from '@/lib/ringtone';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -63,47 +64,47 @@ export default function NannyCalls() {
   const [visibleCount, setVisibleCount] = useState(10);
   const prevIncomingCountRef = useRef(0);
 
-  // Fetch calls on mount and auto-refresh every 5 seconds to catch incoming calls
-  useEffect(() => {
-    fetchCalls();
-    const interval = setInterval(fetchCalls, 5000);
-    return () => clearInterval(interval);
-  }, [user?.id]);
-
-  // Show toast when a new incoming call appears
-  useEffect(() => {
-    if (incomingCalls.length > prevIncomingCountRef.current && prevIncomingCountRef.current >= 0) {
-      const newCall = incomingCalls[0];
-      toast('📞 Incoming Call!', {
-        description: `${newCall.parentName} wants to connect`,
-        duration: 8000,
-      });
-      // Auto-switch to incoming tab
-      setActiveTab('incoming');
-    }
-    prevIncomingCountRef.current = incomingCalls.length;
-  }, [incomingCalls.length]);
-
-  const fetchCalls = async () => {
+  const fetchCalls = useCallback(async () => {
     if (!user?.id) return;
     try {
-      setLoading(true);
       const res = await apiGet<{ calls: any[] }>(`/api/calls?userId=${user.id}&limit=100`);
       // Flatten nested API data into flat CallSession objects
       const flatCalls = (res.calls || []).map(flattenCall);
       setAllCalls(flatCalls.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-    } catch {
-      // empty
+    } catch (err) {
+      console.error('Failed to fetch calls:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
+
+  // Fetch calls on mount and auto-refresh every 5 seconds to catch incoming calls
+  useEffect(() => {
+    setLoading(true);
+    fetchCalls();
+    const interval = setInterval(fetchCalls, 5000);
+    return () => clearInterval(interval);
+  }, [fetchCalls]);
 
   const incomingCalls = allCalls.filter((c) => c.status === 'PENDING' && c.type === 'INSTANT');
   const scheduledCalls = allCalls.filter(
     (c) => c.type === 'SCHEDULED' && (c.status === 'ACCEPTED' || c.status === 'PENDING')
   );
   const completedCalls = allCalls.filter((c) => c.status === 'COMPLETED');
+
+  // Show toast and play sound when a new incoming call appears via polling
+  useEffect(() => {
+    if (incomingCalls.length > prevIncomingCountRef.current && prevIncomingCountRef.current >= 0) {
+      const newCall = incomingCalls[0];
+      playNotificationBeep();
+      toast('📞 Incoming Call!', {
+        description: `${newCall.parentName} wants to connect`,
+        duration: 8000,
+      });
+      setActiveTab('incoming');
+    }
+    prevIncomingCountRef.current = incomingCalls.length;
+  }, [incomingCalls.length]);
 
   const handleAccept = async (call: CallSession) => {
     try {

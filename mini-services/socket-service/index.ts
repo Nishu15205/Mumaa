@@ -25,8 +25,7 @@ function getCallSession(callId: string) {
 
 // ─── State ─────────────────────────────────────────────────────────────────
 
-const SOCKET_PORT = 3003
-const API_PORT = 3004
+const PORT = 3003
 
 const userSockets = new Map<string, any>()
 const socketUsers = new Map<string, string>()
@@ -39,9 +38,89 @@ function broadcastOnlineUsers() {
   try { io.emit('online-users', { users: Array.from(onlineUserInfo.values()) }) } catch { /* ignore */ }
 }
 
-// ─── Socket.IO (port 3003) ────────────────────────────────────────────────
+// ─── HTTP Server with API routes ───────────────────────────────────────────
 
-const httpServer = createServer()
+const httpServer = createServer(async (req, res) => {
+  const url = req.url || '/'
+
+  // Let Socket.IO handle its own paths
+  if (url.startsWith('/socket.io')) {
+    return
+  }
+
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    })
+    res.end()
+    return
+  }
+
+  // Health check
+  if (req.method === 'GET' && url === '/health') {
+    const body = JSON.stringify({
+      status: 'ok',
+      onlineUsers: onlineUsers.size,
+      onlineList: Array.from(onlineUsers),
+    })
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Content-Length': Buffer.byteLength(body),
+    })
+    res.end(body)
+    return
+  }
+
+  // Emit event to a connected user — uses async iterator for reliable body reading in Bun
+  if (req.method === 'POST' && url === '/emit') {
+    try {
+      const chunks: Buffer[] = []
+      for await (const chunk of req) {
+        chunks.push(chunk as Buffer)
+      }
+      const raw = Buffer.concat(chunks).toString()
+      const { toUserId, event, data } = JSON.parse(raw)
+
+      if (!toUserId || !event) {
+        const errBody = JSON.stringify({ error: 'toUserId and event required' })
+        res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+        res.end(errBody)
+        return
+      }
+
+      const target = getSocketByUserId(toUserId)
+      if (target) {
+        target.emit(event, data || {})
+        console.log(`[api] ${event} -> ${toUserId} ✓`)
+        const okBody = JSON.stringify({ success: true, delivered: true })
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+        res.end(okBody)
+      } else {
+        console.log(`[api] ${event} -> ${toUserId} ✗ (offline)`)
+        const offBody = JSON.stringify({ success: true, delivered: false, reason: 'user_offline' })
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+        res.end(offBody)
+      }
+    } catch (err) {
+      console.error('[api] emit error:', err)
+      const errBody = JSON.stringify({ error: 'invalid json' })
+      res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+      res.end(errBody)
+    }
+    return
+  }
+
+  // 404 for everything else
+  const notFound = JSON.stringify({ error: 'Not Found' })
+  res.writeHead(404, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+  res.end(notFound)
+})
+
+// ─── Socket.IO attached to same HTTP server ───────────────────────────────
 
 const io = new Server(httpServer, {
   path: '/socket.io',
@@ -149,71 +228,18 @@ io.on('connection', (socket) => {
   socket.on('error', (e: any) => { console.error(`[!] ${socket.id}:`, e?.message || e) })
 })
 
-// ─── HTTP API (port 3004) — using http.createServer with TIMEOUT ──────────
-
-const apiServer = createServer((req, res) => {
-  const respond = (code: number, data: any) => {
-    res.writeHead(code, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
-    res.end(JSON.stringify(data))
-  }
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type' })
-    res.end()
-    return
-  }
-
-  if (req.method === 'GET' && req.url === '/health') {
-    respond(200, { status: 'ok', onlineUsers: onlineUsers.size, onlineList: Array.from(onlineUsers) })
-    return
-  }
-
-  if (req.method === 'POST' && req.url === '/emit') {
-    // CRITICAL: Set a timeout to prevent hanging if body stream never ends
-    const timeout = setTimeout(() => { req.destroy(); respond(408, { error: 'timeout' }) }, 10000)
-    let body = ''
-
-    req.on('data', (chunk: Buffer) => { body += chunk.toString() })
-    req.on('error', () => { clearTimeout(timeout); respond(400, { error: 'stream_error' }) })
-    req.on('end', () => {
-      clearTimeout(timeout)
-      try {
-        const { toUserId, event, data } = JSON.parse(body)
-        if (!toUserId || !event) { respond(400, { error: 'toUserId and event required' }); return }
-
-        const target = getSocketByUserId(toUserId)
-        if (target) {
-          target.emit(event, data || {})
-          console.log(`[api] ${event} -> ${toUserId} ✓`)
-          respond(200, { success: true, delivered: true })
-        } else {
-          console.log(`[api] ${event} -> ${toUserId} ✗ (offline)`)
-          respond(200, { success: true, delivered: false, reason: 'user_offline' })
-        }
-      } catch (err) {
-        respond(400, { error: 'invalid json' })
-      }
-    })
-    return
-  }
-
-  respond(404, { error: 'Not Found' })
-})
-
 // ─── Start ─────────────────────────────────────────────────────────────────
 
-httpServer.listen(SOCKET_PORT, () => {
-  console.log(`Socket.IO on :${SOCKET_PORT}`)
-  console.log(`HTTP API on :${API_PORT}`)
+httpServer.listen(PORT, () => {
+  console.log(`Socket.IO + HTTP API on :${PORT}`)
   console.log(`DB: ${db ? 'ok' : 'not available'}`)
   console.log('Ready!\n')
-})
-
-apiServer.listen(API_PORT, () => {
-  console.log(`[api] HTTP API server on :${API_PORT}`)
 })
 
 // ─── NEVER crash ───────────────────────────────────────────────────────────
 
 process.on('uncaughtException', (err) => { console.error('[!!!] Exception:', err) })
 process.on('unhandledRejection', (reason) => { console.error('[!!!] Rejection:', reason) })
+
+// Keep process alive — Bun exits when event loop is empty
+setInterval(() => {}, 1000)

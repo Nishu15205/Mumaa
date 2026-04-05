@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { PhoneOff, Phone, Video } from 'lucide-react'
+import { PhoneOff, Phone, Video, Volume2 } from 'lucide-react'
 import { useAppStore } from '@/stores/app-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { apiPut } from '@/lib/api'
 import { toast } from 'sonner'
+import { startRingtone, stopRingtone } from '@/lib/ringtone'
 import type { IncomingCall } from '@/types'
 
 interface IncomingCallDialogProps {
@@ -22,6 +23,7 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
   const handleAccept = useCallback(async () => {
     if (!call || !user || accepting) return
 
+    stopRingtone()
     setAccepting(true)
 
     try {
@@ -85,6 +87,8 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
   const handleDecline = useCallback(async () => {
     if (!call) return
 
+    stopRingtone()
+
     try {
       // Update call status to CANCELLED
       await apiPut(`/api/calls/${call.callId}/status`, { status: 'CANCELLED' })
@@ -117,7 +121,13 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
 
   // Auto-dismiss after 30 seconds
   useEffect(() => {
-    if (!call) return
+    if (!call) {
+      stopRingtone()
+      return
+    }
+
+    // Start ringtone when call arrives
+    startRingtone()
 
     let remaining = 30
 
@@ -125,6 +135,7 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       remaining -= 1
       if (remaining <= 0) {
         clearInterval(timer)
+        stopRingtone()
 
         // Auto-decline: update status and notify caller
         if (call.callId && call.callerId) {
@@ -148,7 +159,10 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       setTimeLeft(remaining)
     }, 1000)
 
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      stopRingtone()
+    }
   }, [call, setIncomingCall])
 
   // Don't render if there's no incoming call or an active call exists
@@ -231,9 +245,17 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
           </div>
 
           {/* Timer */}
-          <p className="text-xs text-gray-400">
-            Auto-declines in {timeLeft}s
-          </p>
+          <div className="flex items-center gap-2">
+            <motion.div
+              animate={{ opacity: [1, 0.5, 1] }}
+              transition={{ duration: 0.5, repeat: Infinity }}
+            >
+              <Volume2 className="w-3.5 h-3.5 text-rose-400" />
+            </motion.div>
+            <p className="text-xs text-gray-400">
+              Auto-declines in {timeLeft}s
+            </p>
+          </div>
 
           {/* Actions */}
           <div className="flex items-center gap-8">

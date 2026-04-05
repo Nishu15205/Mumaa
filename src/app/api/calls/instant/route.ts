@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
 
     // Notify nanny via socket service HTTP API (real-time ringing)
     try {
-      const SOCKET_API_PORT = process.env.SOCKET_API_PORT || 3004;
+      const SOCKET_API_PORT = process.env.SOCKET_API_PORT || 3003;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
       await fetch(`http://localhost:${SOCKET_API_PORT}/emit`, {
