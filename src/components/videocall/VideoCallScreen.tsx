@@ -9,6 +9,9 @@ import {
   X,
   Loader2,
   WifiOff,
+  Video,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -19,19 +22,22 @@ import { CallTimer } from './CallTimer'
 import { StarRating } from '@/components/common/StarRating'
 import { WebRTCCall } from './WebRTCCall'
 
-type CallState = 'waiting' | 'connecting' | 'active' | 'ended'
+type CallState = 'waiting' | 'connecting' | 'active' | 'ended' | 'failed'
 
 const WAIT_TIMEOUT_SECONDS = 5 * 60
+const CONNECTION_TIMEOUT_SECONDS = 20
 
 export function VideoCallScreen() {
   const { currentCall, endCall, waitingForNanny, setWaitingForNanny, socket } = useAppStore()
   const { user } = useAuthStore()
 
-  // IMPORTANT: Only PARENT should ever be in 'waiting' state.
+  // IMPORTANT: Only PARENT should EVER be in 'waiting' state.
   // Nanny always starts in 'connecting' state (they already accepted).
   const isCaller = user?.role === 'PARENT'
   const shouldWait = isCaller && waitingForNanny
 
+  // Extra safety: re-derive callState every render to prevent stale state
+  // If user is NOT a parent (i.e. nanny), shouldWait is ALWAYS false
   const [callState, setCallState] = useState<CallState>(() =>
     shouldWait ? 'waiting' : 'connecting'
   )
@@ -44,9 +50,13 @@ export function VideoCallScreen() {
   const [callDurationOnEnd, setCallDurationOnEnd] = useState(0)
   const [waitSecondsLeft, setWaitSecondsLeft] = useState(WAIT_TIMEOUT_SECONDS)
   const [socketReady, setSocketReady] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [connectingSeconds, setConnectingSeconds] = useState(0)
 
   // Ref to the shared socket — stays stable across renders
   const socketRef = useRef<any>(null)
+  const connectingTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const mountedRef = useRef(true)
 
   // Keep socketRef in sync with the store socket
   useEffect(() => {
@@ -67,7 +77,6 @@ export function VideoCallScreen() {
     const onDisconnect = () => setSocketReady(false)
     s.on('connect', onConnect)
     s.on('disconnect', onDisconnect)
-    // Set initial state
     setSocketReady(!!s.connected)
     return () => {
       s.off('connect', onConnect)
@@ -103,6 +112,41 @@ export function VideoCallScreen() {
     return () => clearInterval(interval)
   }, [callState])
 
+  // Connection timeout — if stuck in 'connecting' for too long, show error
+  useEffect(() => {
+    if (callState !== 'connecting') {
+      setConnectingSeconds(0)
+      if (connectingTimerRef.current) {
+        clearInterval(connectingTimerRef.current)
+        connectingTimerRef.current = null
+      }
+      return
+    }
+
+    setConnectingSeconds(0)
+    connectingTimerRef.current = setInterval(() => {
+      if (!mountedRef.current) return
+      setConnectingSeconds((prev) => {
+        const next = prev + 1
+        if (next >= CONNECTION_TIMEOUT_SECONDS) {
+          // Connection timeout — show error
+          setConnectionError('Connection timed out. The other person may not be online or there may be a network issue.')
+          setCallState('failed')
+          if (connectingTimerRef.current) clearInterval(connectingTimerRef.current)
+          return next
+        }
+        return next
+      })
+    }, 1000)
+
+    return () => {
+      if (connectingTimerRef.current) {
+        clearInterval(connectingTimerRef.current)
+        connectingTimerRef.current = null
+      }
+    }
+  }, [callState])
+
   // Poll for nanny acceptance (parent only)
   useEffect(() => {
     if (callState !== 'waiting') return
@@ -133,6 +177,7 @@ export function VideoCallScreen() {
   const handleConnected = useCallback(() => {
     setCallState('active')
     setCallStartTime(new Date())
+    setConnectionError(null)
     toast.success('Connected')
   }, [])
 
@@ -148,6 +193,8 @@ export function VideoCallScreen() {
   // WebRTC error
   const handleError = useCallback((message: string) => {
     toast.error('Call Error', { description: message })
+    setConnectionError(message)
+    setCallState('failed')
   }, [])
 
   // Persist call end
@@ -171,6 +218,12 @@ export function VideoCallScreen() {
     }
     setCallState('ended')
   }, [callStartTime, currentCall, persistCallEnd])
+
+  const handleRetryConnection = useCallback(() => {
+    setConnectionError(null)
+    setCallState('connecting')
+    setConnectingSeconds(0)
+  }, [])
 
   const handleSubmitReview = useCallback(async () => {
     if (!rating || !currentCall || !user) return
@@ -207,7 +260,20 @@ export function VideoCallScreen() {
     setCallDurationOnEnd(0)
     setWaitSecondsLeft(WAIT_TIMEOUT_SECONDS)
     setWaitingForNanny(false)
+    setConnectionError(null)
+    setConnectingSeconds(0)
   }, [endCall, setWaitingForNanny])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (connectingTimerRef.current) {
+        clearInterval(connectingTimerRef.current)
+      }
+    }
+  }, [])
 
   // Don't render if no active call
   if (!currentCall) return null
@@ -220,7 +286,7 @@ export function VideoCallScreen() {
   const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 
   // WebRTC is ready when: state is connecting/active, we have the other person's ID, and socket is connected
-  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketReady
+  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketReady && !connectionError
 
   return (
     <motion.div
@@ -276,7 +342,7 @@ export function VideoCallScreen() {
       </AnimatePresence>
 
       {/* ============================================================
-          CONNECTING STATE — Socket not ready yet (fallback UI)
+          CONNECTING STATE — Nanny side (no socket yet) or Parent transitioning
           ============================================================ */}
       <AnimatePresence>
         {callState === 'connecting' && !socketReady && (
@@ -305,6 +371,49 @@ export function VideoCallScreen() {
                 >
                   <ArrowLeft className="w-4 h-4 mr-2" />
                   Go Back
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ============================================================
+          FAILED STATE — Connection error or timeout
+          ============================================================ */}
+      <AnimatePresence>
+        {callState === 'failed' && (
+          <motion.div
+            key="failed"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950 p-4"
+          >
+            <div className="w-full max-w-md bg-gray-900 rounded-3xl p-8 shadow-2xl border border-gray-800 text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-400" />
+              </div>
+              <h2 className="text-xl font-bold text-white mb-2">Connection Failed</h2>
+              <p className="text-gray-400 text-sm mb-2">{otherPersonName}</p>
+              <p className="text-gray-500 text-sm mb-6 leading-relaxed">
+                {connectionError || 'Could not establish video connection. Please make sure both users are online and try again.'}
+              </p>
+              <div className="flex flex-col gap-3">
+                <Button
+                  onClick={handleRetryConnection}
+                  className="bg-rose-500 hover:bg-rose-600 text-white rounded-xl h-11 font-medium"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Try Again
+                </Button>
+                <Button
+                  onClick={handleBackToDashboard}
+                  variant="outline"
+                  className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white rounded-xl h-11 font-medium"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Dashboard
                 </Button>
               </div>
             </div>

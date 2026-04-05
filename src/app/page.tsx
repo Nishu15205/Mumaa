@@ -284,6 +284,17 @@ export default function Home() {
           }
         });
 
+        // Nanny has joined the video call screen and is ready for WebRTC
+        socket.on('call-joined', (data: any) => {
+          const store = useAppStore.getState();
+          if (store.currentCall && store.currentCall.id === data.callId) {
+            // Immediately clear waiting state so parent starts WebRTC offer
+            if (store.waitingForNanny) {
+              store.setWaitingForNanny(false);
+            }
+          }
+        });
+
         socket.on('call-rejected', (data: any) => {
           const store = useAppStore.getState();
           if (store.currentCall && store.currentCall.id === data.callId) {

@@ -109,3 +109,43 @@ Work Log:
 - Files changed:
   - package.json — dev script starts socket service before Next.js
   - mini-services/socket-service/package.json — created for container auto-start
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Comprehensive fix for video call state management and connection timeout
+
+Work Log:
+- Analyzed full video call flow end-to-end (parent → nanny → WebRTC)
+- Identified multiple issues:
+  1. Nanny could get stuck in 'waiting' state (timer screen) if `waitingForNanny` was stale
+  2. No connection timeout — WebRTC "Connecting..." state could run forever
+  3. No clear error message when the other user isn't online
+  4. Parent relied on 300ms polling to detect nanny acceptance (slow transition)
+- Key fixes:
+  1. VideoCallScreen.tsx: Added 'failed' CallState with dedicated error UI (red error card with "Try Again" + "Back to Dashboard")
+  2. VideoCallScreen.tsx: Added 20-second connection timeout — if stuck in 'connecting' for 20s, auto-transitions to 'failed'
+  3. VideoCallScreen.tsx: Reset all state on back to dashboard (connectionError, connectingSeconds, etc.)
+  4. WebRTCCall.tsx: Added `offerSentRef` to prevent duplicate offer sends
+  5. WebRTCCall.tsx: Better error handling when socket disconnects before sending offer/answer
+  6. WebRTCCall.tsx: Removed debug log display from UI (was cluttering connecting screen)
+  7. NannyCalls.tsx: Moved `setWaitingForNanny(false)` BEFORE API call and socket emit
+  8. NannyCalls.tsx: Added `call-joined` event emission when nanny starts video call
+  9. IncomingCallDialog.tsx: Added `call-joined` event emission after accept
+  10. socket-service/index.ts: Added `call-joined` event relay (for nanny → parent signaling)
+  11. page.tsx: Added `call-joined` socket handler to immediately clear waitingForNanny (faster than polling)
+
+- Files changed:
+  - src/components/videocall/VideoCallScreen.tsx — Added 'failed' state, 20s timeout, comprehensive state reset
+  - src/components/videocall/WebRTCCall.tsx — offerSentRef, better error handling, cleaner UI
+  - src/components/dashboard/nanny/NannyCalls.tsx — call-joined event, waitingForNanny before API
+  - src/components/videocall/IncomingCallDialog.tsx — call-joined event
+  - mini-services/socket-service/index.ts — call-joined relay
+  - src/app/page.tsx — call-joined handler for faster parent transition
+
+Stage Summary:
+- Nanny will NEVER see the waiting timer (isCaller check + explicit setWaitingForNanny(false))
+- 20-second connection timeout prevents infinite "Connecting..." state
+- Clear "Connection Failed" error UI with retry and back buttons
+- call-joined event provides faster parent → connecting transition (vs 300ms polling)
+- Socket service stable on port 3003, Next.js dev server on port 3000

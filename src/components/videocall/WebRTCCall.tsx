@@ -48,6 +48,7 @@ export function WebRTCCall({
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const callStartTimeRef = useRef<Date | null>(null)
   const cleanupCalledRef = useRef(false)
+  const offerSentRef = useRef(false)
 
   const [isAudioEnabled, setIsAudioEnabled] = useState(true)
   const [isVideoEnabled, setIsVideoEnabled] = useState(true)
@@ -59,7 +60,7 @@ export function WebRTCCall({
   const addLog = useCallback((msg: string) => {
     const ts = new Date().toLocaleTimeString('en-IN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     log(`[${ts}] ${msg}`)
-    setConnectionLog((prev) => [...prev.slice(-4), `[${ts}] ${msg}`])
+    setConnectionLog((prev) => [...prev.slice(-6), `[${ts}] ${msg}`])
   }, [])
 
   const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
@@ -138,7 +139,6 @@ export function WebRTCCall({
         onError('Connection failed. This may be due to network restrictions (NAT/firewall). Both users need a stable internet connection.')
       } else if (state === 'disconnected') {
         addLog('Connection disconnected - attempting recovery...')
-        // Wait 5 seconds before declaring failure (may recover)
         setTimeout(() => {
           if (pc.connectionState === 'disconnected') {
             const duration = callStartTimeRef.current
@@ -174,6 +174,8 @@ export function WebRTCCall({
         // Google STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
         // Metered TURN servers (free tier)
         {
           urls: 'turn:openrelay.metered.ca:80',
@@ -190,9 +192,6 @@ export function WebRTCCall({
           username: 'openrelayproject',
           credential: 'openrelayproject',
         },
-        // Additional STUN
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
       ],
       iceCandidatePoolSize: 10,
     })
@@ -242,16 +241,17 @@ export function WebRTCCall({
     }
   }, [addLog])
 
-  // Caller: initiate call
+  // Caller: initiate call — send WebRTC offer
   const initiateCall = useCallback(async () => {
+    if (offerSentRef.current) return
     const socket = socketRef.current
     if (!socket) {
       addLog('ERROR: Socket not ready, cannot start call')
+      onError('Socket not connected. Please check your internet connection.')
       return
     }
     if (!socket.connected) {
       addLog('Waiting for socket to connect...')
-      // Wait up to 3 seconds for socket to connect
       await new Promise<void>((resolve) => {
         let attempts = 0
         const check = setInterval(() => {
@@ -264,7 +264,14 @@ export function WebRTCCall({
       })
     }
 
+    if (!socketRef.current?.connected) {
+      addLog('ERROR: Socket still not connected after waiting')
+      onError('Could not connect to signaling server. Please try again.')
+      return
+    }
+
     try {
+      offerSentRef.current = true
       addLog(`Starting call as caller (callId: ${callId})`)
       const stream = await getMedia(true)
       const pc = createPC()
@@ -275,16 +282,12 @@ export function WebRTCCall({
       await pc.setLocalDescription(offer)
       addLog('Local description set (offer)')
 
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('webrtc-offer', {
-          callId,
-          toUserId: otherUserId,
-          sdp: pc.localDescription?.toJSON(),
-        })
-        addLog(`Offer sent to ${otherUserId.slice(0, 8)}...`)
-      } else {
-        addLog('ERROR: Socket disconnected, cannot send offer')
-      }
+      socketRef.current.emit('webrtc-offer', {
+        callId,
+        toUserId: otherUserId,
+        sdp: pc.localDescription?.toJSON(),
+      })
+      addLog(`Offer sent to ${otherUserId.slice(0, 8)}...`)
     } catch (err: any) {
       addLog(`Start call failed: ${err.message}`)
       onError(err?.message || 'Failed to start video call. Please allow camera/microphone access.')
@@ -299,9 +302,8 @@ export function WebRTCCall({
     const onOffer = async (data: any) => {
       addLog(`Received offer from ${data.fromUserId?.slice(0, 8)}`)
       if (data.callId === callId && data.fromUserId === otherUserId) {
-        // Get media and create answer
         try {
-          addLog('Received offer, creating answer...')
+          addLog('Processing offer, creating answer...')
           const stream = await getMedia(true)
           const pc = createPC()
           stream.getTracks().forEach((t) => pc.addTrack(t, stream))
@@ -318,7 +320,9 @@ export function WebRTCCall({
               toUserId: otherUserId,
               sdp: pc.localDescription?.toJSON(),
             })
-            addLog('Answer sent')
+            addLog('Answer sent back')
+          } else {
+            addLog('ERROR: Socket disconnected before answer could be sent')
           }
         } catch (err: any) {
           addLog(`Accept call failed: ${err.message}`)
@@ -332,8 +336,12 @@ export function WebRTCCall({
       if (data.callId === callId && data.fromUserId === otherUserId) {
         const pc = pcRef.current
         if (pc) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
-          addLog('Remote description set (answer)')
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+            addLog('Remote description set (answer) — ICE negotiation starting...')
+          } catch (err: any) {
+            addLog(`Set remote description error: ${err.message}`)
+          }
         } else {
           addLog('ERROR: No peer connection to set answer on')
         }
@@ -371,8 +379,12 @@ export function WebRTCCall({
         initiateCall()
       }, 800)
       return () => clearTimeout(timer)
+    } else {
+      // For callee (nanny), just get media ready so camera/mic permissions are requested
+      // The actual WebRTC will start when offer arrives
+      addLog('Waiting for caller to send offer...')
     }
-  }, [isCaller, initiateCall])
+  }, [isCaller, initiateCall, addLog])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -407,7 +419,15 @@ export function WebRTCCall({
       if (!pc) return
 
       if (isScreenSharing) {
-        const stream = await getMedia(true)
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: {
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 },
+            frameRate: { ideal: 30 },
+            facingMode: 'user',
+          },
+        })
         const sender = pc.getSenders().find((s) => s.track?.kind === 'video')
         if (sender) {
           const videoTrack = stream.getVideoTracks()[0]
@@ -422,7 +442,15 @@ export function WebRTCCall({
           await sender.replaceTrack(screenTrack)
         }
         screenTrack.onended = async () => {
-          const stream = await getMedia(true)
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: {
+              width: { ideal: 1280, min: 640 },
+              height: { ideal: 720, min: 480 },
+              frameRate: { ideal: 30 },
+              facingMode: 'user',
+            },
+          })
           const newVideoTrack = stream.getVideoTracks()[0]
           const sender2 = pc.getSenders().find((s) => s.track?.kind === 'video')
           if (sender2 && newVideoTrack) await sender2.replaceTrack(newVideoTrack)
@@ -463,7 +491,7 @@ export function WebRTCCall({
         )}
       />
 
-      {/* Remote placeholder */}
+      {/* Remote placeholder — shown while connecting or when remote video not present */}
       {!isRemoteVideoPresent && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
           <motion.div
@@ -476,7 +504,12 @@ export function WebRTCCall({
             </div>
             <p className="text-white/80 text-lg font-medium">{otherPersonName}</p>
             {callStatus === 'connecting' && (
-              <p className="text-white/40 text-sm mt-1">Waiting for video...</p>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <p className="text-white/40 text-sm">
+                  {isCaller ? `Connecting to ${otherPersonName}...` : `Waiting for ${otherPersonName} to connect...`}
+                </p>
+              </div>
             )}
           </motion.div>
         </div>
@@ -509,7 +542,7 @@ export function WebRTCCall({
         </div>
       </div>
 
-      {/* Controls bar - always visible when connecting or connected */}
+      {/* Controls bar — always visible when connecting or connected */}
       <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center pb-6 pt-12 bg-gradient-to-t from-black/70 to-transparent">
         <div className="flex items-center gap-3 sm:gap-4">
           {/* Audio toggle */}
@@ -595,12 +628,6 @@ export function WebRTCCall({
               <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
               <span className="text-white text-xs font-medium">Connecting...</span>
             </div>
-            {/* Debug log - only visible during connecting */}
-            <div className="mt-1 max-w-md px-2">
-              {connectionLog.map((log, i) => (
-                <p key={i} className="text-white/30 text-[10px] font-mono leading-tight">{log}</p>
-              ))}
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -617,34 +644,6 @@ export function WebRTCCall({
             <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/20 backdrop-blur-sm">
               <div className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="text-emerald-300 text-xs font-medium">Connected</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Error state */}
-      <AnimatePresence>
-        {callStatus === 'failed' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 p-6"
-          >
-            <div className="text-center max-w-sm">
-              <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-4">
-                <PhoneOff className="w-8 h-8 text-red-400" />
-              </div>
-              <h3 className="text-white text-lg font-semibold mb-2">Connection Failed</h3>
-              <p className="text-gray-400 text-sm mb-4">Could not establish video connection.</p>
-              {/* Show debug logs */}
-              <div className="bg-gray-900 rounded-lg p-3 mb-4 text-left">
-                {connectionLog.map((l, i) => (
-                  <p key={i} className="text-gray-500 text-[10px] font-mono leading-tight">{l}</p>
-                ))}
-              </div>
-              <Button onClick={endCall} className="bg-red-500 hover:bg-red-600 text-white rounded-xl px-8">
-                Go Back
-              </Button>
             </div>
           </motion.div>
         )}

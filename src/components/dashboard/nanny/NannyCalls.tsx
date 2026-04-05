@@ -110,6 +110,10 @@ export default function NannyCalls() {
     try {
       await apiPut(`/api/calls/${call.id}/status`, { status: 'ACCEPTED' });
 
+      // CRITICAL: Nanny must NEVER be in waiting state.
+      // Ensure waitingForNanny is false BEFORE starting the call.
+      setWaitingForNanny(false);
+
       // Notify parent via the shared socket (already connected & authenticated!)
       const sharedSocket = useAppStore.getState().socket
       if (sharedSocket?.connected) {
@@ -123,12 +127,16 @@ export default function NannyCalls() {
       toast.success('Call accepted! Joining video call...');
       fetchCalls();
 
-      // CRITICAL: Nanny must NEVER be in waiting state.
-      // Ensure waitingForNanny is false before starting the call.
-      setWaitingForNanny(false);
-
       // Auto-join the video call after accepting
       setTimeout(() => {
+        // Emit call-joined so parent knows nanny is ready for WebRTC
+        const sock = useAppStore.getState().socket
+        if (sock?.connected) {
+          sock.emit('call-joined', {
+            callId: call.id,
+            toUserId: call.parentId,
+          })
+        }
         startCall(call);
       }, 800);
     } catch {
@@ -139,6 +147,16 @@ export default function NannyCalls() {
   const handleJoinCall = (call: CallSession) => {
     // Nanny must never be in waiting state
     setWaitingForNanny(false);
+
+    // Emit call-joined so parent knows nanny is ready for WebRTC
+    const sock = useAppStore.getState().socket
+    if (sock?.connected) {
+      sock.emit('call-joined', {
+        callId: call.id,
+        toUserId: call.parentId,
+      })
+    }
+
     startCall(call);
   };
 

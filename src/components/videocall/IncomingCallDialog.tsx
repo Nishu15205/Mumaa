@@ -75,6 +75,17 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
     setWaitingForNanny(false)
     startCall(session)
     setIncomingCall(null)
+
+    // Emit call-joined so parent knows nanny is ready for WebRTC
+    setTimeout(() => {
+      const sock = useAppStore.getState().socket
+      if (sock?.connected) {
+        sock.emit('call-joined', {
+          callId: call.callId,
+          toUserId: call.callerId,
+        })
+      }
+    }, 500)
   }, [call, user, startCall, setIncomingCall, accepting, emitSocket, setWaitingForNanny])
 
   const handleDecline = useCallback(async () => {

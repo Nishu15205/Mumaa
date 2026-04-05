@@ -169,6 +169,18 @@ io.on('connection', (socket) => {
     } catch (err) { console.error('[call] err:', err) }
   })
 
+  socket.on('call-joined', (p: any) => {
+    try {
+      const { callId, toUserId } = p || {}
+      if (!socket.data?.userId) return
+      const t = getSocketByUserId(toUserId)
+      if (t) {
+        t.emit('call-joined', { callId, joinerId: socket.data.userId })
+        console.log(`[call] joined -> ${toUserId}`)
+      }
+    } catch (err) { console.error('[call-joined] err:', err) }
+  })
+
   socket.on('call-accepted', (p: any) => {
     try {
       const { callId, toUserId, roomName } = p || {}
