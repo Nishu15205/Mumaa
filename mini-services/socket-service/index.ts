@@ -50,9 +50,10 @@ interface OnlineUser {
   socketId: string
 }
 
-// ─── State ─────────────────────────────────────────────────────────────────
+// ─── State (shared between Socket.IO and HTTP API) ─────────────────────────
 
-const PORT = 3003
+const SOCKET_PORT = 3003
+const API_PORT = 3004
 
 /** userId → socket.id */
 const userSockets = new Map<string, string>()
@@ -66,51 +67,9 @@ const onlineUsers = new Set<string>()
 /** Detailed online user info */
 const onlineUserInfo = new Map<string, OnlineUser>()
 
-// ─── HTTP & Socket.IO Server ───────────────────────────────────────────────
+// ─── Socket.IO Server (port 3003) ──────────────────────────────────────────
 
-const httpServer = createServer((req, res) => {
-  // ─── HTTP API for server-to-server event emission ───────────────
-  if (req.method === 'POST' && req.url === '/emit') {
-    let body = ''
-    req.on('data', (chunk) => { body += chunk })
-    req.on('end', () => {
-      try {
-        const { toUserId, event, data } = JSON.parse(body)
-        if (!toUserId || !event) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'toUserId and event are required' }))
-          return
-        }
-
-        const target = getSocketByUserId(toUserId)
-        if (target) {
-          target.emit(event, data || {})
-          console.log(`[http-emit] -> ${event} to ${toUserId}`)
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true, delivered: true }))
-        } else {
-          console.log(`[http-emit] -> ${event} to ${toUserId} FAILED (offline)`)
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true, delivered: false, reason: 'user_offline' }))
-        }
-      } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
-      }
-    })
-    return
-  }
-
-  // Health check
-  if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ status: 'ok', onlineUsers: onlineUsers.size, port: PORT }))
-    return
-  }
-
-  res.writeHead(404)
-  res.end('Not Found')
-})
+const httpServer = createServer()
 
 const io = new Server(httpServer, {
   path: '/socket.io',
@@ -123,6 +82,83 @@ const io = new Server(httpServer, {
   pingTimeout: 60000,
   pingInterval: 25000,
 })
+
+// ─── HTTP API Server (port 3004) — Using Bun.serve for proper body handling
+// Separate server so Socket.IO engine doesn't intercept API requests
+
+Bun.serve({
+  port: API_PORT,
+  async fetch(req) {
+    const url = new URL(req.url)
+
+    // CORS preflight
+    if (req.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      })
+    }
+
+    // POST /emit — Send a socket event to a specific user
+    if (url.pathname === '/emit' && req.method === 'POST') {
+      try {
+        const body = await req.json()
+        const { toUserId, event, data } = body
+
+        if (!toUserId || !event) {
+          return Response.json(
+            { error: 'toUserId and event are required' },
+            { status: 400, headers: corsHeaders() }
+          )
+        }
+
+        const target = getSocketByUserId(toUserId)
+        if (target) {
+          target.emit(event, data || {})
+          console.log(`[api-emit] -> ${event} to ${toUserId} ✓`)
+          return Response.json(
+            { success: true, delivered: true },
+            { headers: corsHeaders() }
+          )
+        } else {
+          console.log(`[api-emit] -> ${event} to ${toUserId} ✗ (offline)`)
+          return Response.json(
+            { success: true, delivered: false, reason: 'user_offline' },
+            { headers: corsHeaders() }
+          )
+        }
+      } catch (err) {
+        return Response.json(
+          { error: 'Invalid JSON body' },
+          { status: 400, headers: corsHeaders() }
+        )
+      }
+    }
+
+    // GET /health — Health check
+    if (url.pathname === '/health' && req.method === 'GET') {
+      return Response.json({
+        status: 'ok',
+        onlineUsers: onlineUsers.size,
+        socketPort: SOCKET_PORT,
+        apiPort: API_PORT,
+      }, { headers: corsHeaders() })
+    }
+
+    return Response.json(
+      { error: 'Not Found' },
+      { status: 404, headers: corsHeaders() }
+    )
+  },
+})
+
+function corsHeaders() {
+  return { 'Access-Control-Allow-Origin': '*' }
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -146,7 +182,7 @@ function log(socket: Socket, event: string, data?: unknown) {
   }
 }
 
-// ─── Connection ────────────────────────────────────────────────────────────
+// ─── Socket.IO Connection ──────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
   const clientIp = socket.handshake.address || 'unknown'
@@ -242,7 +278,6 @@ io.on('connection', (socket) => {
 
     const target = getSocketByUserId(toUserId)
     if (target) {
-      // Look up call session for extra data
       const session = getCallSession(callId)
       target.emit('call-accepted', {
         callId,
@@ -351,7 +386,6 @@ io.on('connection', (socket) => {
     const { callId, toUserId, candidate } = payload
     const fromUserId = socket.data.userId
     if (!fromUserId) return
-    // Don't log every ICE candidate (too noisy)
     const target = getSocketByUserId(toUserId)
     if (target) {
       target.emit('webrtc-ice-candidate', { callId, fromUserId, candidate })
@@ -390,15 +424,16 @@ io.on('connection', (socket) => {
   })
 })
 
-// ─── Start ─────────────────────────────────────────────────────────────────
+// ─── Start Both Servers ────────────────────────────────────────────────────
 
-httpServer.listen(PORT, () => {
+httpServer.listen(SOCKET_PORT, () => {
   console.log('')
   console.log('=======================================================')
   console.log('  MUMAA Socket Service')
-  console.log(`  Port: ${PORT}`)
-  console.log(`  DB:   ${db ? DB_PATH : 'not available'}`)
-  console.log('  CORS: all origins enabled')
+  console.log(`  Socket.IO: port ${SOCKET_PORT}`)
+  console.log(`  HTTP API:  port ${API_PORT} (Bun.serve)`)
+  console.log(`  DB:        ${db ? DB_PATH : 'not available'}`)
+  console.log('  CORS:      all origins enabled')
   console.log('  Ready for connections')
   console.log('=======================================================')
   console.log('')

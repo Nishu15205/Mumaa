@@ -96,8 +96,8 @@ export async function PUT(
     // Push real-time socket event to both parties
     if (socketEvent) {
       try {
-        const SOCKET_PORT = process.env.SOCKET_PORT || 3003;
-        const socketBase = `http://localhost:${SOCKET_PORT}/emit`;
+        const SOCKET_API_PORT = process.env.SOCKET_API_PORT || 3004;
+        const socketBase = `http://localhost:${SOCKET_API_PORT}/emit`;
 
         // Determine who triggered the action (parent or nanny)
         // We notify the OTHER party about the status change

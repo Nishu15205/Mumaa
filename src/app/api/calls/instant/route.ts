@@ -135,10 +135,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Notify nanny via socket service (real-time ringing)
+    // Notify nanny via socket service HTTP API (real-time ringing)
     try {
-      const SOCKET_PORT = process.env.SOCKET_PORT || 3003;
-      await fetch(`http://localhost:${SOCKET_PORT}/emit`, {
+      const SOCKET_API_PORT = process.env.SOCKET_API_PORT || 3004;
+      await fetch(`http://localhost:${SOCKET_API_PORT}/emit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

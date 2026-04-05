@@ -558,3 +558,25 @@ Stage Summary:
 - Complete signaling flow now works: Parent → Socket → Nanny → Socket → Parent
 - WebRTC component has visible debug logs for easy troubleshooting
 - Demo accounts ready: parent@demo.com, nanny@demo.com, priya@demo.com (all: demo123)
+
+---
+Task ID: 14
+Agent: Main Agent
+Task: Fix nanny not receiving incoming call notification
+
+Work Log:
+- Diagnosed root cause: Socket.IO engine on port 3003 was intercepting ALL HTTP requests including `/emit` and `/health` API endpoints, returning `{"code":0,"message":"Transport unknown"}` instead of the actual API handler
+- Also found: Bun's `http.createServer` + `req.on('data')` stream API hangs when receiving POST bodies from Node.js `fetch()`, causing the socket service to crash
+- Fixed by:
+  1. Created separate HTTP API server using `Bun.serve()` on port 3004 (shares same userSockets Map with Socket.IO on 3003)
+  2. Updated `/api/calls/instant/route.ts` to use port 3004 (SOCKET_API_PORT env var)
+  3. Updated `/api/calls/[id]/status/route.ts` to use port 3004
+- Both servers share the same in-memory state (userSockets, onlineUsers maps) since they run in the same Bun process
+- Verified end-to-end: Next.js API → POST /emit (3004) → socket service finds nanny's socket → emits incoming-call event
+- Socket service running with keep-alive loop for auto-restart
+
+Stage Summary:
+- Root cause: Socket.IO engine intercepted ALL HTTP requests on port 3003, blocking `/emit` API endpoint
+- Solution: Dedicated HTTP API server on port 3004 using Bun.serve() for proper body handling
+- Nanny now receives real-time incoming-call notifications when parent calls
+- 0 lint errors, all APIs tested working
