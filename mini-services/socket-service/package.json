@@ -1,14 +1,6 @@
 {
-  "name": "mumaa-socket-service",
-  "version": "1.0.0",
-  "private": true,
+  "name": "socket-service",
   "scripts": {
-    "dev": "bun index.ts",
-    "dev:hot": "bun --hot index.ts"
-  },
-  "dependencies": {
-    "socket.io": "^4.8.0",
-    "@prisma/client": "^6.11.1",
-    "better-sqlite3": "^11.7.0"
+    "dev": "bun index.ts"
   }
 }

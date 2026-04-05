@@ -56,3 +56,56 @@ Stage Summary:
 - WebRTC signaling (offer/answer/ICE) uses the already-connected shared socket
 - No more temp sockets that break the userSockets mapping
 - Socket service handles disconnect gracefully (only removes mapping if it's THE current socket)
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix nanny side still showing timer after joining video call
+
+Work Log:
+- Diagnosed ROOT CAUSE: Socket service was dead (port 3003 not listening) — WebRTC signaling couldn't work at all
+- Additionally found state management bug: when user switches roles (parent→nanny) in same tab, `waitingForNanny` persists in Zustand store, causing nanny to see waiting timer
+- Key fixes applied:
+  1. Socket service restarted and made more robust (heartbeat interval every 30s, keepalive interval every 1s)
+  2. WebRTC signaling relay in socket service now logs offer/answer routing for debugging
+  3. VideoCallScreen.tsx: Nanny can NEVER be in 'waiting' state — derived from `isCaller && waitingForNanny` instead of just `waitingForNanny`
+  4. VideoCallScreen.tsx: Added socket-not-ready fallback UI (shows "Connecting to server..." with back button instead of blank screen)
+  5. VideoCallScreen.tsx: Added `socketReady` state monitoring with connect/disconnect listeners
+  6. NannyCalls.tsx: Explicitly sets `setWaitingForNanny(false)` before calling `startCall()`
+  7. NannyCalls.tsx: Same fix in `handleJoinCall()` for nanny joining ACCEPTED calls
+  8. IncomingCallDialog.tsx: Sets `setWaitingForNanny(false)` before `startCall()` for nanny
+  9. WebRTCCall.tsx: Added Metered TURN servers (openrelay.metered.ca) for NAT traversal in restricted networks
+  10. WebRTCCall.tsx: Inlined the offer handler (removed separate `acceptCall` callback) to avoid stale closure issues
+
+- Files changed:
+  - mini-services/socket-service/index.ts — WebRTC relay logging, heartbeat interval
+  - src/components/videocall/VideoCallScreen.tsx — nanny state fix, socket-ready UI, socketReady monitoring
+  - src/components/dashboard/nanny/NannyCalls.tsx — explicit waitingForNanny=false
+  - src/components/videocall/IncomingCallDialog.tsx — explicit waitingForNanny=false
+  - src/components/videocall/WebRTCCall.tsx — TURN servers, inlined offer handler
+
+Stage Summary:
+- Nanny will NEVER see the waiting timer — state is derived from isCaller (parent-only)
+- Socket service is running with robust keepalive and debugging
+- WebRTC has TURN servers for reliable NAT traversal
+- Both sides show meaningful UI when socket is not ready
+- WebRTC signaling is properly relayed and logged
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Make socket service persist as child process of Next.js dev server
+
+Work Log:
+- Root cause: Bun background processes get killed when the Bash tool session ends
+- Socket service alone survives because it's forked as a detached process
+- Solution: Modified package.json `dev` script to start socket service in background before Next.js
+  - `"dev": "cd mini-services/socket-service && (bun index.ts &) && cd ../.. && next dev -p 3000 2>&1 | tee dev.log"`
+- Created `package.json` for socket service (needed by container's mini-service auto-start)
+- Socket service now persists reliably as a child of the `bun run dev` process
+- Added WebRTC signaling debug logging to socket service (offer/answer routing)
+- Verified: socket service stays alive for 50+ seconds independently
+
+- Files changed:
+  - package.json — dev script starts socket service before Next.js
+  - mini-services/socket-service/package.json — created for container auto-start

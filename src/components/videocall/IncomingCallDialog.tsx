@@ -15,7 +15,7 @@ interface IncomingCallDialogProps {
 }
 
 export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
-  const { startCall, setIncomingCall, currentCall, socket } = useAppStore()
+  const { startCall, setIncomingCall, currentCall, socket, setWaitingForNanny } = useAppStore()
   const { user } = useAuthStore()
   const [timeLeft, setTimeLeft] = useState(30)
   const [accepting, setAccepting] = useState(false)
@@ -71,9 +71,11 @@ export function IncomingCallDialog({ call }: IncomingCallDialogProps) {
       updatedAt: new Date().toISOString(),
     }
 
+    // Ensure nanny is never in waiting state
+    setWaitingForNanny(false)
     startCall(session)
     setIncomingCall(null)
-  }, [call, user, startCall, setIncomingCall, accepting, emitSocket])
+  }, [call, user, startCall, setIncomingCall, accepting, emitSocket, setWaitingForNanny])
 
   const handleDecline = useCallback(async () => {
     if (!call) return

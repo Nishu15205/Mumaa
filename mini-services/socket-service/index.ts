@@ -200,9 +200,36 @@ io.on('connection', (socket) => {
     } catch (err) { console.error('[call-ended] err:', err) }
   })
 
-  socket.on('webrtc-offer', (p: any) => { try { const t = getSocketByUserId(p?.toUserId); if (t) t.emit('webrtc-offer', { callId: p?.callId, fromUserId: socket.data?.userId, sdp: p?.sdp }) } catch {} })
-  socket.on('webrtc-answer', (p: any) => { try { const t = getSocketByUserId(p?.toUserId); if (t) t.emit('webrtc-answer', { callId: p?.callId, fromUserId: socket.data?.userId, sdp: p?.sdp }) } catch {} })
-  socket.on('webrtc-ice-candidate', (p: any) => { try { const t = getSocketByUserId(p?.toUserId); if (t) t.emit('webrtc-ice-candidate', { callId: p?.callId, fromUserId: socket.data?.userId, candidate: p?.candidate }) } catch {} })
+  socket.on('webrtc-offer', (p: any) => {
+    try {
+      const t = getSocketByUserId(p?.toUserId)
+      if (t) {
+        t.emit('webrtc-offer', { callId: p?.callId, fromUserId: socket.data?.userId, sdp: p?.sdp })
+        console.log(`[webrtc] offer ${p?.callId?.slice(0,6)} ${socket.data?.userId?.slice(0,6)} -> ${p?.toUserId?.slice(0,6)}`)
+      } else {
+        console.log(`[webrtc] offer ${p?.callId?.slice(0,6)} -> ${p?.toUserId?.slice(0,6)} OFFLINE`)
+      }
+    } catch (e) { console.error('[webrtc-offer] err:', e) }
+  })
+  socket.on('webrtc-answer', (p: any) => {
+    try {
+      const t = getSocketByUserId(p?.toUserId)
+      if (t) {
+        t.emit('webrtc-answer', { callId: p?.callId, fromUserId: socket.data?.userId, sdp: p?.sdp })
+        console.log(`[webrtc] answer ${p?.callId?.slice(0,6)} ${socket.data?.userId?.slice(0,6)} -> ${p?.toUserId?.slice(0,6)}`)
+      } else {
+        console.log(`[webrtc] answer ${p?.callId?.slice(0,6)} -> ${p?.toUserId?.slice(0,6)} OFFLINE`)
+      }
+    } catch (e) { console.error('[webrtc-answer] err:', e) }
+  })
+  socket.on('webrtc-ice-candidate', (p: any) => {
+    try {
+      const t = getSocketByUserId(p?.toUserId)
+      if (t) {
+        t.emit('webrtc-ice-candidate', { callId: p?.callId, fromUserId: socket.data?.userId, candidate: p?.candidate })
+      }
+    } catch (e) { console.error('[webrtc-ice] err:', e) }
+  })
 
   socket.on('new-notification', (p: any) => {
     try {
@@ -249,4 +276,14 @@ process.on('uncaughtException', (err) => { console.error('[!!!] Exception:', err
 process.on('unhandledRejection', (reason) => { console.error('[!!!] Rejection:', reason) })
 
 // Keep process alive — Bun exits when event loop is empty
+// The HTTP server listener should keep it alive
 setInterval(() => {}, 1000)
+
+// Periodic heartbeat log
+setInterval(() => {
+  const now = new Date().toLocaleTimeString('en-IN', { hour12: false })
+  console.log(`[${now}] heartbeat — ${onlineUsers.size} users online`)
+}, 30000)
+
+// Explicitly prevent process exit
+process.stdin.on('data', () => {})

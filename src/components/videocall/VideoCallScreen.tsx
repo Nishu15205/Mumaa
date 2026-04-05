@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   Clock,
   X,
+  Loader2,
+  WifiOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -25,8 +27,13 @@ export function VideoCallScreen() {
   const { currentCall, endCall, waitingForNanny, setWaitingForNanny, socket } = useAppStore()
   const { user } = useAuthStore()
 
+  // IMPORTANT: Only PARENT should ever be in 'waiting' state.
+  // Nanny always starts in 'connecting' state (they already accepted).
+  const isCaller = user?.role === 'PARENT'
+  const shouldWait = isCaller && waitingForNanny
+
   const [callState, setCallState] = useState<CallState>(() =>
-    waitingForNanny ? 'waiting' : 'connecting'
+    shouldWait ? 'waiting' : 'connecting'
   )
   const [callStartTime, setCallStartTime] = useState<Date | null>(null)
   const [rating, setRating] = useState(0)
@@ -36,6 +43,7 @@ export function VideoCallScreen() {
   const [otherPersonId, setOtherPersonId] = useState('')
   const [callDurationOnEnd, setCallDurationOnEnd] = useState(0)
   const [waitSecondsLeft, setWaitSecondsLeft] = useState(WAIT_TIMEOUT_SECONDS)
+  const [socketReady, setSocketReady] = useState(false)
 
   // Ref to the shared socket — stays stable across renders
   const socketRef = useRef<any>(null)
@@ -44,6 +52,26 @@ export function VideoCallScreen() {
   useEffect(() => {
     if (socket) {
       socketRef.current = socket
+      setSocketReady(!!socket.connected)
+    } else {
+      socketRef.current = null
+      setSocketReady(false)
+    }
+  }, [socket])
+
+  // Monitor socket connection state
+  useEffect(() => {
+    const s = socketRef.current
+    if (!s) return
+    const onConnect = () => setSocketReady(true)
+    const onDisconnect = () => setSocketReady(false)
+    s.on('connect', onConnect)
+    s.on('disconnect', onDisconnect)
+    // Set initial state
+    setSocketReady(!!s.connected)
+    return () => {
+      s.off('connect', onConnect)
+      s.off('disconnect', onDisconnect)
     }
   }, [socket])
 
@@ -59,7 +87,7 @@ export function VideoCallScreen() {
     }
   }, [currentCall, user])
 
-  // 5-minute countdown for waiting
+  // 5-minute countdown for waiting (parent only)
   useEffect(() => {
     if (callState !== 'waiting') return
     const interval = setInterval(() => {
@@ -75,7 +103,7 @@ export function VideoCallScreen() {
     return () => clearInterval(interval)
   }, [callState])
 
-  // Poll for nanny acceptance
+  // Poll for nanny acceptance (parent only)
   useEffect(() => {
     if (callState !== 'waiting') return
     const interval = setInterval(() => {
@@ -191,9 +219,8 @@ export function VideoCallScreen() {
 
   const getInitials = (name: string) => name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 
-  const isCaller = user?.role === 'PARENT'
-  // Use the shared socket — it's already connected and authenticated from page.tsx
-  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketRef.current?.connected
+  // WebRTC is ready when: state is connecting/active, we have the other person's ID, and socket is connected
+  const isWebRTCReady = (callState === 'connecting' || callState === 'active') && otherPersonId && socketReady
 
   return (
     <motion.div
@@ -203,7 +230,7 @@ export function VideoCallScreen() {
       className="fixed inset-0 z-[90] bg-gray-950 flex flex-col"
     >
       {/* ============================================================
-          WAITING STATE
+          WAITING STATE — PARENT ONLY
           ============================================================ */}
       <AnimatePresence>
         {callState === 'waiting' && (
@@ -241,6 +268,43 @@ export function VideoCallScreen() {
                 >
                   <X className="w-4 h-4 mr-2" />
                   Cancel
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ============================================================
+          CONNECTING STATE — Socket not ready yet (fallback UI)
+          ============================================================ */}
+      <AnimatePresence>
+        {callState === 'connecting' && !socketReady && (
+          <motion.div
+            key="socket-waiting"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950 p-4"
+          >
+            <div className="text-center">
+              <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
+                <WifiOff className="w-8 h-8 text-amber-400" />
+              </div>
+              <h2 className="text-xl font-bold text-white mb-2">Connecting to server...</h2>
+              <p className="text-gray-400 text-sm mb-6">Establishing secure connection</p>
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="w-5 h-5 text-rose-400 animate-spin" />
+                <span className="text-sm text-gray-500">Please wait...</span>
+              </div>
+              <div className="mt-8">
+                <Button
+                  onClick={handleBackToDashboard}
+                  variant="outline"
+                  className="bg-white/10 text-white border-white/20 hover:bg-white/20 rounded-full px-8 h-11 text-sm"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Go Back
                 </Button>
               </div>
             </div>

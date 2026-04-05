@@ -171,8 +171,26 @@ export function WebRTCCall({
     addLog('Creating RTCPeerConnection...')
     const pc = new RTCPeerConnection({
       iceServers: [
+        // Google STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        // Metered TURN servers (free tier)
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        // Additional STUN
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
       ],
@@ -273,35 +291,7 @@ export function WebRTCCall({
     }
   }, [callId, otherUserId, socketRef, getMedia, createPC, onError, addLog])
 
-  // Callee: accept incoming offer
-  const acceptCall = useCallback(async (offerSdp: any) => {
-    try {
-      addLog('Received offer, creating answer...')
-      const stream = await getMedia(true)
-      const pc = createPC()
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream))
-
-      await pc.setRemoteDescription(new RTCSessionDescription(offerSdp))
-      addLog('Remote description set (offer)')
-      const answer = await pc.createAnswer()
-      await pc.setLocalDescription(answer)
-      addLog('Local description set (answer)')
-
-      if (socketRef.current?.connected) {
-        socketRef.current.emit('webrtc-answer', {
-          callId,
-          toUserId: otherUserId,
-          sdp: pc.localDescription?.toJSON(),
-        })
-        addLog('Answer sent')
-      }
-    } catch (err: any) {
-      addLog(`Accept call failed: ${err.message}`)
-      onError(err?.message || 'Failed to accept call.')
-    }
-  }, [callId, otherUserId, socketRef, getMedia, createPC, onError, addLog])
-
-  // Handle incoming signaling
+  // WebRTC signaling — handle offer/answer/ICE from the other peer
   useEffect(() => {
     const socket = socketRef.current
     if (!socket) return
@@ -309,7 +299,31 @@ export function WebRTCCall({
     const onOffer = async (data: any) => {
       addLog(`Received offer from ${data.fromUserId?.slice(0, 8)}`)
       if (data.callId === callId && data.fromUserId === otherUserId) {
-        await acceptCall(data.sdp)
+        // Get media and create answer
+        try {
+          addLog('Received offer, creating answer...')
+          const stream = await getMedia(true)
+          const pc = createPC()
+          stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+
+          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+          addLog('Remote description set (offer)')
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
+          addLog('Local description set (answer)')
+
+          if (socketRef.current?.connected) {
+            socketRef.current.emit('webrtc-answer', {
+              callId,
+              toUserId: otherUserId,
+              sdp: pc.localDescription?.toJSON(),
+            })
+            addLog('Answer sent')
+          }
+        } catch (err: any) {
+          addLog(`Accept call failed: ${err.message}`)
+          onError(err?.message || 'Failed to accept call.')
+        }
       }
     }
 
@@ -348,7 +362,7 @@ export function WebRTCCall({
       socket.off('webrtc-answer', onAnswer)
       socket.off('webrtc-ice-candidate', onICE)
     }
-  }, [socketRef, callId, otherUserId, acceptCall, addLog])
+  }, [socketRef, callId, otherUserId, addLog, getMedia, createPC, onError])
 
   // Auto-start for caller
   useEffect(() => {

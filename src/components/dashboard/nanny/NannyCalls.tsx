@@ -57,7 +57,7 @@ function flattenCall(raw: any): CallSession {
 
 export default function NannyCalls() {
   const { user } = useAuthStore();
-  const { startCall } = useAppStore();
+  const { startCall, setWaitingForNanny } = useAppStore();
   const [allCalls, setAllCalls] = useState<CallSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('incoming');
@@ -123,6 +123,10 @@ export default function NannyCalls() {
       toast.success('Call accepted! Joining video call...');
       fetchCalls();
 
+      // CRITICAL: Nanny must NEVER be in waiting state.
+      // Ensure waitingForNanny is false before starting the call.
+      setWaitingForNanny(false);
+
       // Auto-join the video call after accepting
       setTimeout(() => {
         startCall(call);
@@ -133,6 +137,8 @@ export default function NannyCalls() {
   };
 
   const handleJoinCall = (call: CallSession) => {
+    // Nanny must never be in waiting state
+    setWaitingForNanny(false);
     startCall(call);
   };
 
