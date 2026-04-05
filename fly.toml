@@ -1,36 +1,26 @@
-# ─── Fly.io Configuration for MUMAA ──────────────────────────────────────────
-# Documentation: https://fly.io/docs/reference/configuration/
+# Fly.io Configuration for MUMAA
 
-app = "mumaa-nishu"
+app = "mumaa-app-nishu15205"
 
-# Primary region (change to your closest region)
-# Available: https://fly.io/docs/reference/regions/
-primary_region = "bom"
+primary_region = "sin"
 
-# Build configuration
 [build]
 
-# ─── Deploy to a single Machine ───────────────────────────────────────────────
 [deploy]
   strategy = "rolling"
-
-# ─── Process Configuration ───────────────────────────────────────────────────
 
 [[services]]
   internal_port = 3000
   protocol = "tcp"
 
-  # HTTP → redirects to HTTPS
   [[services.ports]]
     port = 80
     handlers = ["http"]
 
-  # HTTPS
   [[services.ports]]
     port = 443
     handlers = ["tls", "http"]
 
-  # HTTP health check against the Next.js app
   [services.http_checks]
     interval = "30s"
     timeout = "10s"
@@ -38,32 +28,19 @@ primary_region = "bom"
     method = "get"
     path = "/"
 
-# ─── Persistent Volume for SQLite Database ───────────────────────────────────
-# This ensures the database survives across deployments
-
 [[mounts]]
-  source = "mumaa_nishu_data"
+  source = "mumaa_app_data"
   destination = "/app/db"
-
-# ─── Environment Variables (non-secret) ──────────────────────────────────────
-# Secrets should be set via: fly secrets set KEY=VALUE
 
 [env]
   PORT = "3000"
   NODE_ENV = "production"
 
-# ─── Machine Configuration ───────────────────────────────────────────────────
-
 [vm]
-  # Shared CPU — good for most workloads
   cpu_kind = "shared"
   cpus = 1
-  # 512MB RAM (minimum for Next.js + Bun + Socket.IO)
   memory_mb = 512
-  # Swap for memory headroom
   swap_size_mb = 512
-
-# ─── Experimental Features ───────────────────────────────────────────────────
 
 [experimental]
   auto_rollback = true
