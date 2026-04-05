@@ -1,0 +1,76 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+.next
+out
+dist
+build
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug & logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev.log
+server.log
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+.eslintcache
+*.tsbuildinfo
+
+# Git
+.git
+.gitignore
+
+# Work / agent logs
+worklog.md
+worklog*.md
+worklog-append.txt
+agent-ctx
+examples
+
+# Docker (avoid recursive copy)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Fly.io local state
+.fly
+
+# Uploads (large files — not needed for build)
+upload/*
+!upload/.gitkeep
+
+# Database file (created at runtime via volume mount)
+db/*.db
+db/*.db-journal
+
+# Bun lock file backed up (not needed in image)
+bun.lock.bak
+
+# Download folder
+download/
