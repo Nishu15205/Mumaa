@@ -1,7 +1,7 @@
 # ─── Fly.io Configuration for MUMAA ──────────────────────────────────────────
 # Documentation: https://fly.io/docs/reference/configuration/
 
-app = "mumaa"
+app = "mumaa-nishu"
 
 # Primary region (change to your closest region)
 # Available: https://fly.io/docs/reference/regions/
@@ -42,7 +42,7 @@ primary_region = "bom"
 # This ensures the database survives across deployments
 
 [[mounts]]
-  source = "mumaa_data"
+  source = "mumaa_nishu_data"
   destination = "/app/db"
 
 # ─── Environment Variables (non-secret) ──────────────────────────────────────
