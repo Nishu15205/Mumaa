@@ -1,7 +1,5 @@
 # Fly.io Configuration for MUMAA
 
-app = "mumaa-app-nishu15205"
-
 primary_region = "sin"
 
 [build]
@@ -29,7 +27,7 @@ primary_region = "sin"
     path = "/"
 
 [[mounts]]
-  source = "mumaa_app_data"
+  source = "mumaa_data"
   destination = "/app/db"
 
 [env]
